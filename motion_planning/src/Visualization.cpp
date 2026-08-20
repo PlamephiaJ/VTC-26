@@ -8,6 +8,8 @@
 
 #include "../include/motion_planning/Visualization.hpp"
 
+static int num_visuals = 0;
+
 PointsVisualizer::PointsVisualizer(rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub, std::string ns, std::string frame_id, std_msgs::msg::ColorRGBA color, float scale): pub(pub), ns(ns), frame_id(frame_id)
 {
     dots.header.frame_id = frame_id;

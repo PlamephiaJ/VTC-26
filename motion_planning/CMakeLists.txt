@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.8)
 project(motion_planning)
 
-# Default to C++14
+# Default to C++17
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 17)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -11,8 +11,8 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # Find dependencies
-foreach(PACKAGE 
-  ament_cmake 
+foreach(PACKAGE
+  ament_cmake
   rclcpp
   geometry_msgs
   nav_msgs
@@ -37,7 +37,7 @@ include_directories(
 # Create Cpp executable
 add_executable(rrt_node_sim src/main.cpp src/RRT.cpp src/occupancy_grid.cpp src/FileHandler.cpp src/Visualization.cpp)
 
-ament_target_dependencies(rrt_node_sim 
+ament_target_dependencies(rrt_node_sim
   rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros tf2_geometry_msgs tf2
 )
 

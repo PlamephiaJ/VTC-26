@@ -57,9 +57,9 @@ void RRT::draw_point(const geometry_msgs::msg::Point & point, double time_to_liv
     }
     else
     {
-        marker_point_.lifetime = rclcpp::Duration(time_to_live * 1e9);
+        marker_point_.lifetime = rclcpp::Duration::from_seconds(time_to_live);
         publisher_marker_->publish(marker_point_);
-        marker_point_.lifetime = rclcpp::Duration(0);
+        marker_point_.lifetime = rclcpp::Duration::from_seconds(0.0);
     }
     if (unique_point_id_ >= INT32_MAX) unique_point_id_ = 0;
     else unique_point_id_++;
@@ -91,9 +91,9 @@ void RRT::draw_line(const std::vector<geometry_msgs::msg::Point> & points, doubl
     }
     else
     {
-        marker_line_.lifetime = rclcpp::Duration(time_to_live * 1e9);
+        marker_line_.lifetime = rclcpp::Duration::from_seconds(time_to_live);
         publisher_marker_->publish(marker_line_);
-        marker_line_.lifetime = rclcpp::Duration(0);
+        marker_line_.lifetime = rclcpp::Duration::from_seconds(0.0);
     }
     if (unique_line_id_ >= INT32_MAX) unique_line_id_ = 0;
     else unique_line_id_++;
@@ -126,9 +126,9 @@ void RRT::draw_point(const RRT_Node & point, double time_to_live, int color)
     }
     else
     {
-        marker_point_.lifetime = rclcpp::Duration(time_to_live * 1e9);
+        marker_point_.lifetime = rclcpp::Duration::from_seconds(time_to_live);
         publisher_marker_->publish(marker_point_);
-        marker_point_.lifetime = rclcpp::Duration(0);
+        marker_point_.lifetime = rclcpp::Duration::from_seconds(0.0);
     }
     if (unique_point_id_ >= INT32_MAX) unique_point_id_ = 0;
     else unique_point_id_++;
@@ -167,9 +167,9 @@ void RRT::draw_line(const std::vector<RRT_Node> & points, double time_to_live, i
     }
     else
     {
-        marker_line_.lifetime = rclcpp::Duration(time_to_live * 1e9);
+        marker_line_.lifetime = rclcpp::Duration::from_seconds(time_to_live);
         publisher_marker_->publish(marker_line_);
-        marker_line_.lifetime = rclcpp::Duration(0);
+        marker_line_.lifetime = rclcpp::Duration::from_seconds(0.0);
     }
     if (unique_line_id_ >= INT32_MAX) unique_line_id_ = 0;
     else unique_line_id_++;
@@ -194,117 +194,117 @@ RRT::~RRT()
 
 RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
 {
-    this->declare_parameter("MARGIN");
+    this->declare_parameter("MARGIN", MARGIN_);
     MARGIN_ = this->get_parameter("MARGIN").as_double();
     if (MARGIN_ < 0)
     {
         throw std::invalid_argument("Bad configuration. MARGIN must >= 0.");
     }
 
-    this->declare_parameter("DISTANCE_GOAL_AHEAD");
+    this->declare_parameter("DISTANCE_GOAL_AHEAD", DISTANCE_GOAL_AHEAD_);
     DISTANCE_GOAL_AHEAD_ = this->get_parameter("DISTANCE_GOAL_AHEAD").as_double();
     if (DISTANCE_GOAL_AHEAD_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. DISTANCE_GOAL_AHEAD must > 0.");
     }
 
-    this->declare_parameter("SCAN_RANGE");
+    this->declare_parameter("SCAN_RANGE", SCAN_RANGE_);
     SCAN_RANGE_ = this->get_parameter("SCAN_RANGE").as_double();
     if (SCAN_RANGE_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. SCAN_RANGE must > 0.");
     }
 
-    this->declare_parameter("DETECTED_OBS_MARGIN");
+    this->declare_parameter("DETECTED_OBS_MARGIN", DETECTED_OBS_MARGIN_);
     DETECTED_OBS_MARGIN_ =  this->get_parameter("DETECTED_OBS_MARGIN").as_double();
     if (DETECTED_OBS_MARGIN_ < 0)
     {
         throw std::invalid_argument("Bad configuration. DETECTED_OBS_MARGIN must >= 0.");
     }
 
-    this->declare_parameter("MIN_RRT_ITERATIONS");
+    this->declare_parameter("MIN_RRT_ITERATIONS", MIN_RRT_ITERATIONS_);
     MIN_RRT_ITERATIONS_ = this->get_parameter("MIN_RRT_ITERATIONS").as_int();
     if (MIN_RRT_ITERATIONS_ <= 0) {
         throw std::invalid_argument("Bad configuration. MIN_RRT_ITERATIONS must > 0.");
     }
 
-    this->declare_parameter("MAX_RRT_ITERATIONS");
+    this->declare_parameter("MAX_RRT_ITERATIONS", MAX_RRT_ITERATIONS_);
     MAX_RRT_ITERATIONS_ = this->get_parameter("MAX_RRT_ITERATIONS").as_int();
     if (MAX_RRT_ITERATIONS_ < MIN_RRT_ITERATIONS_)
     {
         throw std::invalid_argument("Bad configuration. MAX_RRT_ITERATIONS must >= MIN_RRT_ITERATIONS.");
     }
 
-    this->declare_parameter("STD");
+    this->declare_parameter("STD", STD_);
     STD_ = this->get_parameter("STD").as_double();
     if (STD_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. STD must > 0.");
     }
 
-    this->declare_parameter("NEAR_RANGE");
+    this->declare_parameter("NEAR_RANGE", NEAR_RANGE_);
     NEAR_RANGE_ = this->get_parameter("NEAR_RANGE").as_double();
     if (NEAR_RANGE_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. NEAR_RANGE must > 0.");
     }
 
-    this->declare_parameter("GOAL_TOLERANCE");
+    this->declare_parameter("GOAL_TOLERANCE", GOAL_TOLERANCE_);
     GOAL_TOLERANCE_ = this->get_parameter("GOAL_TOLERANCE").as_double();
     if (GOAL_TOLERANCE_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. GOAL_TOLERANCE must > 0.");
     }
 
-    this->declare_parameter("RRT_WAYPOINT_INTERVAL");
+    this->declare_parameter("RRT_WAYPOINT_INTERVAL", RRT_WAYPOINT_INTERVAL_);
     RRT_WAYPOINT_INTERVAL_ = this->get_parameter("RRT_WAYPOINT_INTERVAL").as_double();
     if (RRT_WAYPOINT_INTERVAL_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. RRT_WAYPOINT_INTERVAL must > 0.");
     }
 
-    this->declare_parameter("DISTANCE_LOOK_AHEAD");
+    this->declare_parameter("DISTANCE_LOOK_AHEAD", DISTANCE_LOOK_AHEAD_);
     DISTANCE_LOOK_AHEAD_ = this->get_parameter("DISTANCE_LOOK_AHEAD").as_double();
     if (DISTANCE_LOOK_AHEAD_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. DISTANCE_LOOK_AHEAD must > 0.");
     }
 
-    this->declare_parameter("PID_P");
+    this->declare_parameter("PID_P", PID_P_);
     PID_P_ = this->get_parameter("PID_P").as_double();
     if (PID_P_ <= 0) {
         throw std::invalid_argument("Bad configuration. PID_P must > 0.");
     }
 
-    this->declare_parameter("odom_topic");
+    this->declare_parameter("odom_topic", odom_topic_);
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     if (odom_topic_.empty())
     {
         throw std::invalid_argument("Bad configuration. odom_topic must not be empty.");
     }
 
-    this->declare_parameter("map_topic");
+    this->declare_parameter("map_topic", map_topic_);
     map_topic_ = this->get_parameter("map_topic").as_string();
     if (map_topic_.empty())
     {
         throw std::invalid_argument("Bad configuration. map_topic must not be empty.");
     }
 
-    this->declare_parameter("scan_topic");
+    this->declare_parameter("scan_topic", scan_topic_);
     scan_topic_ = this->get_parameter("scan_topic").as_string();
     if (scan_topic_.empty())
     {
         throw std::invalid_argument("Bad configuration. scan_topic must not be empty.");
     }
 
-    this->declare_parameter("drive_topic");
+    this->declare_parameter("drive_topic", drive_topic_);
     drive_topic_ = this->get_parameter("drive_topic").as_string();
     if (drive_topic_.empty())
     {
         throw std::invalid_argument("Bad configuration. drive_topic must not be empty.");
     }
 
-    this->declare_parameter("waypoint_file_path");
+    this->declare_parameter("waypoint_file_path", waypoint_file_path_);
     waypoint_file_path_ = this->get_parameter("waypoint_file_path").as_string();
 
     CSVHandler csv_handler(waypoint_file_path_);
@@ -464,7 +464,7 @@ bool RRT::lookup_transform()
     }
     catch(const std::exception& e)
     {
-        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", laser_frame_, map_frame_, e.what());
+        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", laser_frame_.c_str(), map_frame_.c_str(), e.what());
         return false;
     }
 
@@ -475,7 +475,7 @@ bool RRT::lookup_transform()
     }
     catch (const tf2::TransformException& e)
     {
-        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", map_frame_, laser_frame_, e.what());
+        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", map_frame_.c_str(), laser_frame_.c_str(), e.what());
         return false;
     }
 
@@ -485,7 +485,7 @@ bool RRT::lookup_transform()
     }
     catch (const tf2::TransformException& e)
     {
-        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", map_frame_, car_frame_, e.what());
+        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", map_frame_.c_str(), car_frame_.c_str(), e.what());
         return false;
     }
 
@@ -495,7 +495,7 @@ bool RRT::lookup_transform()
     }
     catch (const tf2::TransformException& e)
     {
-        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", car_frame_, map_frame_, e.what());
+        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", car_frame_.c_str(), map_frame_.c_str(), e.what());
         return false;
     }
 

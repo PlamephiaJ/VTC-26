@@ -14,8 +14,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
-static int num_visuals = 0;
-
 class PointsVisualizer {
 protected:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub;
