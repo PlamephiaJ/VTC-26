@@ -8,6 +8,9 @@
 
 #include "../include/motion_planning/occupancy_grid.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 int occupancy_grid::xy_index_to_array_index(const nav_msgs::msg::OccupancyGrid& grid, const int i_x, const int i_y)
 {
     if (i_x < 0 || i_y < 0 || i_x >= int(grid.info.width) || i_y >= int(grid.info.height))
@@ -30,8 +33,8 @@ int occupancy_grid::xy_coord_to_array_index(const nav_msgs::msg::OccupancyGrid& 
         return -1;
     }
 
-    int i_x = static_cast<int>(floor((x - grid.info.origin.position.x) / grid.info.resolution));
-    int i_y = static_cast<int>(floor((y - grid.info.origin.position.y) / grid.info.resolution));
+    int i_x = static_cast<int>(std::floor((x - grid.info.origin.position.x) / grid.info.resolution));
+    int i_y = static_cast<int>(std::floor((y - grid.info.origin.position.y) / grid.info.resolution));
     return xy_index_to_array_index(grid, i_x, i_y);
 }
 
@@ -79,7 +82,7 @@ std::vector<int> occupancy_grid::inflate_cell(nav_msgs::msg::OccupancyGrid &grid
         return changes;
     }
 
-    int margin_cell = static_cast<int>(ceil(margin / grid.info.resolution));
+    int margin_cell = static_cast<int>(std::ceil(margin / grid.info.resolution));
     std::pair<int, int> xy_index = array_index_to_xy_index(grid, i);
     for (int x = std::max(0, xy_index.first - margin_cell); x <= std::min(int(grid.info.width) - 1, xy_index.first + margin_cell); x++)
     {

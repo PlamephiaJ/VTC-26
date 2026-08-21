@@ -1,38 +1,75 @@
-/*
- * @Author: Yuhao Chen
- * @Date: 2024-06-23 10:26:20
- * @LastEditors: Yuhao Chen
- * @LastEditTime: 2024-06-25 11:49:24
- * @Description: Occupancy grid releated functions. xy_index means the grid x, y index. xy_coord means map frame x, y coordinates. array_index means grid.data array index.
- */
-
-#ifndef OCCUPANCY_GRID_HPP
-#define OCCUPANCY_GRID_HPP
+#ifndef MOTION_PLANNING__OCCUPANCY_GRID_HPP_
+#define MOTION_PLANNING__OCCUPANCY_GRID_HPP_
 
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
-#include <math.h>
+#include <utility>
+#include <vector>
 
-namespace occupancy_grid {
-    constexpr int OCCUPIED_THRESHOLD = 50;
+/** Coordinate conversion, occupancy queries, and inflation primitives. */
+namespace occupancy_grid
+{
 
-    int xy_index_to_array_index(const nav_msgs::msg::OccupancyGrid& grid, const int i_x, const int i_y);
+constexpr int OCCUPIED_THRESHOLD = 50;
 
-    int xy_coord_to_array_index(const nav_msgs::msg::OccupancyGrid& grid, const float x, const float y);
+/**
+ * Input: grid and integer cell coordinates.
+ * Return: row-major data index, or -1 when the cell is outside/invalid.
+ */
+int xy_index_to_array_index(
+    const nav_msgs::msg::OccupancyGrid& grid, int x_index, int y_index);
 
-    std::pair<int, int> array_index_to_xy_index(const nav_msgs::msg::OccupancyGrid& grid, const int i);
+/**
+ * Input: grid and continuous map-frame coordinate.
+ * Return: containing cell's row-major data index, or -1 when outside/invalid.
+ */
+int xy_coord_to_array_index(
+    const nav_msgs::msg::OccupancyGrid& grid, float x, float y);
 
-    float array_index_to_x_coord(const nav_msgs::msg::OccupancyGrid& grid, const int i);
+/**
+ * Input: grid and valid row-major data index.
+ * Return: integer x/y cell indices. Callers must validate the input index.
+ */
+std::pair<int, int> array_index_to_xy_index(
+    const nav_msgs::msg::OccupancyGrid& grid, int array_index);
 
-    float array_index_to_y_coord(const nav_msgs::msg::OccupancyGrid& grid, const int i);
+/** Return the map-frame x coordinate of a valid data index's cell origin. */
+float array_index_to_x_coord(
+    const nav_msgs::msg::OccupancyGrid& grid, int array_index);
 
-    bool is_xy_coord_occupied(const nav_msgs::msg::OccupancyGrid& grid, const float x, const float y);
+/** Return the map-frame y coordinate of a valid data index's cell origin. */
+float array_index_to_y_coord(
+    const nav_msgs::msg::OccupancyGrid& grid, int array_index);
 
-    void set_xy_coord_occupied(nav_msgs::msg::OccupancyGrid& grid, const float x, const float y);
+/**
+ * Input: grid and map-frame coordinate.
+ * Return: true for occupied cells and for coordinates outside the grid. This
+ * fail-closed behavior prevents the planner from leaving the known map.
+ */
+bool is_xy_coord_occupied(
+    const nav_msgs::msg::OccupancyGrid& grid, float x, float y);
 
-    std::vector<int> inflate_cell(nav_msgs::msg::OccupancyGrid &grid, const int i, const float margin, const int val);
+/** Mark the containing cell fully occupied; outside coordinates do nothing. */
+void set_xy_coord_occupied(
+    nav_msgs::msg::OccupancyGrid& grid, float x, float y);
 
-    void inflate_map(nav_msgs::msg::OccupancyGrid& grid, const float margin);
-}
+/**
+ * Inflate one valid cell by a square margin.
+ *
+ * Input: mutable grid, center data index, non-negative metric margin, and
+ * value to write into previously free cells.
+ * Return: indices whose values were changed. Invalid input returns an empty
+ * list and leaves the grid unchanged.
+ */
+std::vector<int> inflate_cell(
+    nav_msgs::msg::OccupancyGrid& grid, int array_index, float margin, int value);
 
-#endif
+/**
+ * Inflate every occupied source cell in place by a non-negative metric margin.
+ * Input/output: the supplied grid is permanently modified.
+ */
+void inflate_map(nav_msgs::msg::OccupancyGrid& grid, float margin);
+
+}  // namespace occupancy_grid
+
+#endif  // MOTION_PLANNING__OCCUPANCY_GRID_HPP_
