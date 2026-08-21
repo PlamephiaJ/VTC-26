@@ -21,7 +21,6 @@
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "visualization_msgs/msg/marker.hpp"
-#include "std_msgs/msg/string.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 
 #include "../include/motion_planning/Visualization.hpp"
@@ -91,16 +90,6 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscriber_scan_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscriber_odom_;
 
-    bool is_sim_start_ = false;
-    std::string control_topic_ = "/sim_control";
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscriber_control_;
-
-    /**
-     * @description: control the node.
-     * @return {*}
-     */
-    void control_callback(const std_msgs::msg::String::ConstSharedPtr control_msg);
-    
     /**
      * @description: map callback to receive initial map.
      * @param {nav_msgs::msg::OccupancyGrid::ConstSharedPtr} map_msg

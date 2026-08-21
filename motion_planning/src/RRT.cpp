@@ -360,34 +360,7 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
     tree_branch_.scale.x = 0.01;
     tree_nodes_.color = red; tree_branch_.color = blue;
 
-    subscriber_control_ = this->create_subscription<std_msgs::msg::String>(control_topic_, 10, std::bind(&RRT::control_callback, this, std::placeholders::_1));
-
     RCLCPP_INFO_STREAM(this->get_logger(), "Node started successfully!");
-}
-
-void RRT::control_callback(const std_msgs::msg::String::ConstSharedPtr control_msg)
-{
-    if (control_msg->data == "stop")
-    {
-        is_sim_start_ = false;
-        auto msg = ackermann_msgs::msg::AckermannDriveStamped();
-        msg.drive.speed = 0.0;
-        msg.drive.steering_angle = 0.0;
-        for (int i = 0; i < 5; i++)
-        {
-            publisher_drive_->publish(msg);
-        }
-        rclcpp::shutdown();
-    }
-    else if (control_msg->data == "start")
-    {
-        is_sim_start_ = true;
-    }
-    else
-    {
-        throw std::runtime_error("Invalid control message!");
-    }
-    
 }
 
 void RRT::map_callback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr map_msg)
@@ -635,11 +608,6 @@ void RRT::find_current_goal()
 
 void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
 {
-    if (!is_sim_start_)
-    {
-        return;
-    }
-    
     if (!lookup_transform())
     {
         return;
