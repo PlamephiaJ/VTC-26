@@ -60,7 +60,9 @@ bridge:
     # Can be overridden at launch time with num_agent:=<n>. 
     # There is no upper limit, but every opponent needs an sx/sy/stheta below or the bridge
     # refuses to start.
-    num_agent: 1
+    # Default to two cars: ego_racecar plus one independently controlled
+    # opponent. Set num_agent:=1 at launch time for a single-car simulation.
+    num_agent: 2
 
     # ego starting pose on map
     sx: -12.0

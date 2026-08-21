@@ -9,7 +9,7 @@ rrt_node:
     start_on_launch: false
 
     # Set this once to an absolute path, or to a path relative to this YAML file.
-    waypoint_file_path: '/home/plamephia/workspace/sim_ws/waypoint/Spielberg_map/clockwise_waypoints_0.0s_Fri_Jun_21_10:09:43_2024.csv'
+    waypoint_file_path: '/home/plamephia/workspace/sim_ws/waypoint/Spielberg_map/filtered.csv'
 
     MARGIN: 0.2
     DISTANCE_GOAL_AHEAD: 3.5

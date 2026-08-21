@@ -116,6 +116,8 @@ You can then run another node by creating another bash session in `tmux` or a se
 ```bash
 ros2 launch f1tenth_gym_ros gym_bridge_launch.py num_agent:=4
 ```
+- The shipped `sim.yaml` starts two cars by default: `ego_racecar` and
+  `opp_racecar`. Use `num_agent:=1` when a single-car simulation is needed.
 - The ego and opponent starting poses can also be changed via parameters (`sx`/`sy`/`stheta` for the ego, `sx1`/`sy1`/`stheta1` onwards for the opponents), these are in the global map coordinate frame. Every agent you ask for needs a start pose: if `num_agent` is 3 but `sx2`/`sy2`/`stheta2` are missing, the bridge stops and tells you which parameters to add rather than guessing a spot on the map for you. The poses shipped in `sim.yaml` line up eight cars on the Levine map (two rows of four), so anything up to `num_agent:=8` works out of the box; add `sx8`/`sy8`/`stheta8` and so on to race more, and change them when you change the map.
 - A different sim config can be selected at launch time. The value is a file name in `config/`, a package relative path, or an absolute path:
 ```bash
