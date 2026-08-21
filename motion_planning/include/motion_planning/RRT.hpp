@@ -3,7 +3,7 @@
 
 #include "motion_planning/Visualization.hpp"
 #include "motion_planning/dynamic_obstacle_map.hpp"
-#include "motion_planning/goal_selector.hpp"
+#include "motion_planning/reference_path_manager.hpp"
 #include "motion_planning/rrt_star_planner.hpp"
 
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
@@ -61,6 +61,12 @@ private:
     double goal_sample_rate_ = 0.1;
     double rrt_waypoint_interval_ = 0.2;
 
+    // Optimal-trajectory progress and safe rejoin parameters.
+    double optimal_rejoin_distance_ = 0.5;
+    double progress_search_backward_ = 2.0;
+    double progress_search_forward_ = 8.0;
+    double projection_fallback_distance_ = 2.5;
+
     // Path tracking parameters.
     double lookahead_distance_ = 0.4;
     double pursuit_gain_ = 0.25;
@@ -111,7 +117,7 @@ private:
 
     // Focused algorithm/state modules.
     dynamic_obstacles::MapLayer obstacle_map_;
-    std::unique_ptr<goal_selection::Selector> goal_selector_;
+    std::unique_ptr<reference_path::Manager> reference_manager_;
     std::unique_ptr<rrt_star::Planner> planner_;
     std::vector<geometry_msgs::msg::Point> global_waypoints_;
     geometry_msgs::msg::Pose current_pose_;
@@ -126,8 +132,11 @@ private:
     geometry_msgs::msg::TransformStamped laser_to_map_;
     geometry_msgs::msg::TransformStamped map_to_vehicle_;
 
-    /** Refresh transforms required by scan projection and path tracking. */
-    bool lookup_transforms();
+    /** Refresh the laser-to-map transform required by scan projection. */
+    bool lookup_laser_transform();
+
+    /** Refresh the map-to-vehicle transform required by path tracking. */
+    bool lookup_vehicle_transform();
 
     /** Transform one point from laser frame to map frame. */
     geometry_msgs::msg::Point laser_point_to_map(
@@ -148,11 +157,12 @@ private:
 
     // ROS visualization helpers; they do not implement planning algorithms.
     void initialize_visualization();
-    void visualize_goal(std::size_t goal_index);
+    void visualize_goal(const geometry_msgs::msg::Point& goal);
     void visualize_tree(const rrt_star::Tree& tree);
+    void clear_tree_visualization();
     void publish_path_marker(
         const std::vector<geometry_msgs::msg::Point>& points);
-    void log_goal_failure(goal_selection::Status status);
+    void log_reference_transition(const reference_path::Decision& decision);
 
     std::unique_ptr<MarkerVisualizer> goal_visualizer_;
     std::unique_ptr<MarkerVisualizer> lookahead_visualizer_;

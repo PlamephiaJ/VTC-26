@@ -89,7 +89,14 @@ TEST(PathTracking, ComputesAndClampsPurePursuitSteering)
 TEST(PathTracking, SelectsSpeedFromSteeringMagnitude)
 {
     constexpr double pi = 3.14159265358979323846;
-    EXPECT_DOUBLE_EQ(2.0, path_tracking::speed_for_steering(5.0 * pi / 180.0));
-    EXPECT_DOUBLE_EQ(1.0, path_tracking::speed_for_steering(15.0 * pi / 180.0));
-    EXPECT_DOUBLE_EQ(0.5, path_tracking::speed_for_steering(25.0 * pi / 180.0));
+    path_tracking::SpeedProfile profile;
+    profile.straight_speed = 2.0;
+    profile.medium_turn_speed = 1.0;
+    profile.sharp_turn_speed = 0.5;
+    EXPECT_DOUBLE_EQ(
+        2.0, path_tracking::speed_for_steering(5.0 * pi / 180.0, profile));
+    EXPECT_DOUBLE_EQ(
+        1.0, path_tracking::speed_for_steering(15.0 * pi / 180.0, profile));
+    EXPECT_DOUBLE_EQ(
+        0.5, path_tracking::speed_for_steering(25.0 * pi / 180.0, profile));
 }

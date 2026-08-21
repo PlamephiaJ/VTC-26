@@ -1,8 +1,8 @@
 #include "motion_planning/rrt_star_planner.hpp"
 
-#include "motion_planning/collision_checker.hpp"
 #include "motion_planning/occupancy_grid.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
@@ -23,6 +23,31 @@ void validate_config(const PlannerConfig& config)
     {
         throw std::invalid_argument("Invalid RRT* planner configuration");
     }
+}
+
+bool edge_is_blocked(
+    const nav_msgs::msg::OccupancyGrid& dynamic_map,
+    const nav_msgs::msg::OccupancyGrid& static_map,
+    const Node& start, const Node& end,
+    const PlannerConfig& config)
+{
+    geometry_msgs::msg::Point start_point;
+    start_point.x = start.x;
+    start_point.y = start.y;
+    geometry_msgs::msg::Point end_point;
+    end_point.x = end.x;
+    end_point.y = end.y;
+
+    occupancy_grid::SegmentCheckOptions options;
+    if (start.is_root)
+    {
+        options.escape_reference_map = &static_map;
+        options.start_escape_distance =
+            std::max(config.static_margin, config.dynamic_margin) +
+            dynamic_map.info.resolution;
+    }
+    return occupancy_grid::segment_is_blocked(
+        dynamic_map, start_point, end_point, options);
 }
 
 }  // namespace
@@ -99,9 +124,9 @@ PlanResult Planner::plan(
             continue;
         }
 
-        if (collision_checker::edge_is_blocked(
+        if (edge_is_blocked(
                 dynamic_map, static_map, result.tree.at(nearest), new_node,
-                config_.static_margin, config_.dynamic_margin))
+                config_))
         {
             continue;
         }
@@ -114,9 +139,9 @@ PlanResult Planner::plan(
 
         for (const std::size_t candidate : near_nodes)
         {
-            if (collision_checker::edge_is_blocked(
+            if (edge_is_blocked(
                     dynamic_map, static_map, result.tree.at(candidate), new_node,
-                    config_.static_margin, config_.dynamic_margin))
+                    config_))
             {
                 continue;
             }
@@ -140,10 +165,9 @@ PlanResult Planner::plan(
             const double rewired_cost = result.tree.at(new_index).cost +
                 edge_length(result.tree.at(new_index), result.tree.at(near_index));
             if (rewired_cost >= result.tree.at(near_index).cost ||
-                collision_checker::edge_is_blocked(
+                edge_is_blocked(
                     dynamic_map, static_map, result.tree.at(near_index),
-                    result.tree.at(new_index), config_.static_margin,
-                    config_.dynamic_margin))
+                    result.tree.at(new_index), config_))
             {
                 continue;
             }

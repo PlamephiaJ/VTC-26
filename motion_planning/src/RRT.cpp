@@ -2,9 +2,7 @@
 
 #include "motion_planning/FileHandler.hpp"
 #include "motion_planning/occupancy_grid.hpp"
-#include "motion_planning/path_processing.hpp"
 #include "motion_planning/path_tracking.hpp"
-#include "motion_planning/scan_processing.hpp"
 
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "std_msgs/msg/color_rgba.hpp"
@@ -142,6 +140,35 @@ void RRT::load_parameters()
             "Bad configuration. RRT_WAYPOINT_INTERVAL must be > 0.");
     }
 
+    this->declare_parameter(
+        "OPTIMAL_REJOIN_DISTANCE", optimal_rejoin_distance_);
+    optimal_rejoin_distance_ =
+        this->get_parameter("OPTIMAL_REJOIN_DISTANCE").as_double();
+    if (optimal_rejoin_distance_ < 0.0)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. OPTIMAL_REJOIN_DISTANCE must be >= 0.");
+    }
+
+    this->declare_parameter(
+        "PROGRESS_SEARCH_BACKWARD", progress_search_backward_);
+    progress_search_backward_ =
+        this->get_parameter("PROGRESS_SEARCH_BACKWARD").as_double();
+    this->declare_parameter(
+        "PROGRESS_SEARCH_FORWARD", progress_search_forward_);
+    progress_search_forward_ =
+        this->get_parameter("PROGRESS_SEARCH_FORWARD").as_double();
+    this->declare_parameter(
+        "PROJECTION_FALLBACK_DISTANCE", projection_fallback_distance_);
+    projection_fallback_distance_ =
+        this->get_parameter("PROJECTION_FALLBACK_DISTANCE").as_double();
+    if (progress_search_backward_ < 0.0 || progress_search_forward_ < 0.0 ||
+        projection_fallback_distance_ < 0.0)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. Progress search distances must be >= 0.");
+    }
+
     this->declare_parameter("DISTANCE_LOOK_AHEAD", lookahead_distance_);
     lookahead_distance_ =
         this->get_parameter("DISTANCE_LOOK_AHEAD").as_double();
@@ -213,8 +240,26 @@ void RRT::initialize_algorithm_modules()
     planner_config.static_margin = map_inflation_margin_;
     planner_config.dynamic_margin = detected_obstacle_margin_;
     planner_ = std::make_unique<rrt_star::Planner>(planner_config);
-    goal_selector_ =
-        std::make_unique<goal_selection::Selector>(goal_ahead_distance_);
+
+    reference_path::ManagerConfig reference_config;
+    reference_config.global_goal_distance = goal_ahead_distance_;
+    reference_config.rejoin_distance = optimal_rejoin_distance_;
+    reference_config.progress_search_backward = progress_search_backward_;
+    reference_config.progress_search_forward = progress_search_forward_;
+    reference_config.projection_fallback_distance =
+        projection_fallback_distance_;
+    reference_manager_ = std::make_unique<reference_path::Manager>(
+        global_waypoints_, reference_config);
+    const std::size_t removed_prefix =
+        reference_manager_->removed_prefix_point_count();
+    if (removed_prefix > 0)
+    {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Normalized closed optimal trajectory: removed %zu overlapping "
+            "pre-roll waypoints",
+            removed_prefix);
+    }
 }
 
 void RRT::initialize_ros_interfaces()
@@ -343,18 +388,33 @@ void RRT::map_callback(
     const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message)
 {
     obstacle_map_.initialize(*message, map_inflation_margin_);
-    goal_selector_->reset();
+    reference_manager_->reset();
     previous_obstacle_clear_time_ = this->get_clock()->now();
     map_subscriber_.reset();
     RCLCPP_INFO(this->get_logger(), "Initial map received and inflated.");
 }
 
-bool RRT::lookup_transforms()
+bool RRT::lookup_laser_transform()
 {
     try
     {
         laser_to_map_ = tf_buffer_->lookupTransform(
             map_frame_, laser_frame_, tf2::TimePointZero);
+    }
+    catch (const tf2::TransformException& error)
+    {
+        RCLCPP_INFO_THROTTLE(
+            this->get_logger(), *this->get_clock(), 1000,
+            "Required TF unavailable: %s", error.what());
+        return false;
+    }
+    return true;
+}
+
+bool RRT::lookup_vehicle_transform()
+{
+    try
+    {
         map_to_vehicle_ = tf_buffer_->lookupTransform(
             vehicle_frame_, map_frame_, tf2::TimePointZero);
     }
@@ -362,7 +422,7 @@ bool RRT::lookup_transforms()
     {
         RCLCPP_INFO_THROTTLE(
             this->get_logger(), *this->get_clock(), 1000,
-            "Required TF unavailable: %s", error.what());
+            "Vehicle TF unavailable: %s", error.what());
         return false;
     }
     return true;
@@ -390,7 +450,7 @@ geometry_msgs::msg::Point RRT::map_point_to_vehicle(
 
 void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr message)
 {
-    if (!obstacle_map_.initialized() || !lookup_transforms())
+    if (!obstacle_map_.initialized() || !lookup_laser_transform())
     {
         return;
     }
@@ -403,7 +463,7 @@ void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr messag
     }
 
     for (const auto& laser_point :
-         scan_processing::valid_hit_points(*message, scan_range_))
+         dynamic_obstacles::valid_hit_points(*message, scan_range_))
     {
         obstacle_map_.add_observation(
             laser_point_to_map(laser_point), detected_obstacle_margin_);
@@ -411,29 +471,27 @@ void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr messag
     dynamic_map_publisher_->publish(obstacle_map_.collision_map());
 }
 
-void RRT::log_goal_failure(const goal_selection::Status status)
+void RRT::log_reference_transition(
+    const reference_path::Decision& decision)
 {
-    const char* reason = "unknown goal-selection error";
-    switch (status)
+    if (!decision.mode_changed)
     {
-        case goal_selection::Status::empty_waypoints:
-            reason = "global waypoint list is empty";
-            break;
-        case goal_selection::Status::no_waypoint_ahead:
-            reason = "no waypoint is ahead of the vehicle";
-            break;
-        case goal_selection::Status::closest_waypoint_too_far:
-            reason = "closest forward waypoint is outside the goal range";
-            break;
-        case goal_selection::Status::no_free_waypoint_in_range:
-            reason = "no collision-free forward waypoint is in range";
-            break;
-        case goal_selection::Status::success:
-            return;
+        return;
     }
-    RCLCPP_WARN_THROTTLE(
-        this->get_logger(), *this->get_clock(), 1000,
-        "Cannot select planning goal: %s.", reason);
+    if (decision.mode == reference_path::Mode::rrt_detour)
+    {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "Optimal trajectory is blocked; switching to RRT* detour mode.");
+    }
+    else
+    {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Optimal trajectory clear and safely reachable (distance %.3f m); "
+            "returning to optimal-reference mode.",
+            decision.projection.distance);
+    }
 }
 
 void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
@@ -443,28 +501,33 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
     {
         return;
     }
-    if (!lookup_transforms())
+    if (!lookup_vehicle_transform())
     {
         stop_vehicle();
         return;
     }
 
-    const goal_selection::Result goal_result = goal_selector_->update(
-        global_waypoints_, current_pose_, obstacle_map_.collision_map(),
-        map_to_vehicle_);
-    if (!goal_result.index)
+    const reference_path::Decision reference = reference_manager_->update(
+        current_pose_.position, obstacle_map_.collision_map());
+    log_reference_transition(reference);
+    visualize_goal(reference.global_goal);
+
+    if (reference.mode == reference_path::Mode::optimal_reference)
     {
-        log_goal_failure(goal_result.status);
-        stop_vehicle();
+        const auto path_points = path_tracking::resample_polyline(
+            reference.local_optimal_reference, rrt_waypoint_interval_);
+        const nav_msgs::msg::Path path =
+            path_tracking::to_path_message(path_points, map_frame_);
+        publish_path_marker(path_points);
+        follow_path(path);
+        clear_tree_visualization();
         return;
     }
 
-    const std::size_t goal_index = *goal_result.index;
-    visualize_goal(goal_index);
-    const auto& goal_point = global_waypoints_.at(goal_index);
     const rrt_star::PlanResult plan = planner_->plan(
         {current_pose_.position.x, current_pose_.position.y},
-        {goal_point.x, goal_point.y}, obstacle_map_.collision_map(),
+        {reference.global_goal.x, reference.global_goal.y},
+        obstacle_map_.collision_map(),
         obstacle_map_.base_map());
 
     if (!plan.success)
@@ -484,11 +547,11 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
         return;
     }
 
-    const auto raw_points = path_processing::nodes_to_points(plan.path);
-    const auto path_points = path_processing::resample_polyline(
+    const auto raw_points = path_tracking::nodes_to_points(plan.path);
+    const auto path_points = path_tracking::resample_polyline(
         raw_points, rrt_waypoint_interval_);
     const nav_msgs::msg::Path path =
-        path_processing::to_path_message(path_points, map_frame_);
+        path_tracking::to_path_message(path_points, map_frame_);
     publish_path_marker(path_points);
     follow_path(path);
     visualize_tree(plan.tree);
@@ -540,11 +603,11 @@ void RRT::stop_vehicle()
     drive_publisher_->publish(command);
 }
 
-void RRT::visualize_goal(const std::size_t goal_index)
+void RRT::visualize_goal(const geometry_msgs::msg::Point& goal)
 {
     geometry_msgs::msg::Pose pose;
     pose.orientation.w = 1.0;
-    pose.position = global_waypoints_.at(goal_index);
+    pose.position = goal;
     goal_visualizer_->set_pose(pose);
     goal_visualizer_->publish_marker();
 }
@@ -585,6 +648,14 @@ void RRT::visualize_tree(const rrt_star::Tree& tree)
             tree_branches_.points.emplace_back(child);
         }
     }
+    tree_branch_publisher_->publish(tree_branches_);
+    tree_node_publisher_->publish(tree_nodes_);
+}
+
+void RRT::clear_tree_visualization()
+{
+    tree_nodes_.points.clear();
+    tree_branches_.points.clear();
     tree_branch_publisher_->publish(tree_branches_);
     tree_node_publisher_->publish(tree_nodes_);
 }

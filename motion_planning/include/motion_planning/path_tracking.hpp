@@ -1,13 +1,36 @@
 #ifndef MOTION_PLANNING__PATH_TRACKING_HPP_
 #define MOTION_PLANNING__PATH_TRACKING_HPP_
 
-#include <optional>
-
+#include "motion_planning/rrt_tree.hpp"
 #include "geometry_msgs/msg/point.hpp"
 #include "nav_msgs/msg/path.hpp"
 
+#include <optional>
+#include <string>
+#include <vector>
+
 namespace path_tracking
 {
+
+/**
+ * Convert an RRT node path to ROS map points.
+ * Input nodes are root-to-goal ordered; returned points preserve that order.
+ */
+std::vector<geometry_msgs::msg::Point> nodes_to_points(
+    const std::vector<rrt_star::Node>& nodes);
+
+/**
+ * Resample a polyline so no output segment exceeds `maximum_spacing`.
+ * Original endpoints are retained; empty/one-point input is unchanged.
+ */
+std::vector<geometry_msgs::msg::Point> resample_polyline(
+    const std::vector<geometry_msgs::msg::Point>& points,
+    double maximum_spacing);
+
+/** Package ordered points as a position-only nav_msgs/Path in `frame_id`. */
+nav_msgs::msg::Path to_path_message(
+    const std::vector<geometry_msgs::msg::Point>& points,
+    const std::string& frame_id);
 
 /** Piecewise speed policy used after Pure Pursuit steering is computed. */
 struct SpeedProfile

@@ -60,3 +60,42 @@ TEST(OccupancyGrid, InflatesLastRowAndColumn)
     EXPECT_EQ(100, grid.data.at(23));
     EXPECT_EQ(100, grid.data.at(24));
 }
+
+TEST(OccupancyGrid, SegmentCollisionSupportsPlannerRootEscape)
+{
+    auto static_grid = create_grid(5, 5);
+    auto dynamic_grid = static_grid;
+    geometry_msgs::msg::Point start;
+    start.x = 1.0;
+    start.y = 0.0;
+    geometry_msgs::msg::Point end;
+    end.x = 2.0;
+    end.y = 0.0;
+    occupancy_grid::set_xy_coord_occupied(dynamic_grid, start.x, start.y);
+
+    EXPECT_TRUE(occupancy_grid::segment_is_blocked(dynamic_grid, start, end));
+
+    occupancy_grid::SegmentCheckOptions options;
+    options.escape_reference_map = &static_grid;
+    options.start_escape_distance = 1.1;
+    EXPECT_FALSE(occupancy_grid::segment_is_blocked(
+        dynamic_grid, start, end, options));
+}
+
+TEST(OccupancyGrid, PolylineCollisionChecksEverySegment)
+{
+    auto grid = create_grid(5, 5);
+    occupancy_grid::set_xy_coord_occupied(grid, 1.0, 0.0);
+    geometry_msgs::msg::Point first;
+    first.x = 0.0;
+    first.y = 0.0;
+    geometry_msgs::msg::Point middle;
+    middle.x = 1.0;
+    middle.y = 0.0;
+    geometry_msgs::msg::Point last;
+    last.x = 2.0;
+    last.y = 0.0;
+
+    EXPECT_TRUE(occupancy_grid::polyline_is_blocked(
+        grid, {first, middle, last}));
+}

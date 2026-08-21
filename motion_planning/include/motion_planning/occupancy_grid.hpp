@@ -1,6 +1,7 @@
 #ifndef MOTION_PLANNING__OCCUPANCY_GRID_HPP_
 #define MOTION_PLANNING__OCCUPANCY_GRID_HPP_
 
+#include "geometry_msgs/msg/point.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
 #include <utility>
@@ -11,6 +12,13 @@ namespace occupancy_grid
 {
 
 constexpr int OCCUPIED_THRESHOLD = 50;
+
+/** Optional exception used when a planner root must exit an inflation bubble. */
+struct SegmentCheckOptions
+{
+    const nav_msgs::msg::OccupancyGrid* escape_reference_map = nullptr;
+    double start_escape_distance = 0.0;
+};
 
 /**
  * Input: grid and integer cell coordinates.
@@ -69,6 +77,28 @@ std::vector<int> inflate_cell(
  * Input/output: the supplied grid is permanently modified.
  */
 void inflate_map(nav_msgs::msg::OccupancyGrid& grid, float margin);
+
+/**
+ * Test one map-frame segment against the grid at cell-resolution spacing.
+ *
+ * Input: collision map, endpoints, and optional root-escape settings.
+ * Return: true when any sampled cell is occupied/outside or the map is invalid.
+ * When an escape reference map is supplied, occupied cells near the segment
+ * start are allowed only if the same cells are free in that reference map.
+ */
+bool segment_is_blocked(
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const geometry_msgs::msg::Point& start,
+    const geometry_msgs::msg::Point& end,
+    const SegmentCheckOptions& options = SegmentCheckOptions{});
+
+/**
+ * Test every adjacent segment of an ordered map-frame polyline.
+ * Empty input is blocked; a single point checks that point directly.
+ */
+bool polyline_is_blocked(
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const std::vector<geometry_msgs::msg::Point>& points);
 
 }  // namespace occupancy_grid
 

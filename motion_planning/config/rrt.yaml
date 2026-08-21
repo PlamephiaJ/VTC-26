@@ -23,6 +23,13 @@ rrt_node:
     GOAL_TOLERANCE: 0.1
     GOAL_SAMPLE_RATE: 0.1
     RRT_WAYPOINT_INTERVAL: 0.2
+
+    # Optimal-trajectory reference selection and safe RRT* rejoin.
+    OPTIMAL_REJOIN_DISTANCE: 0.5
+    PROGRESS_SEARCH_BACKWARD: 2.0
+    PROGRESS_SEARCH_FORWARD: 8.0
+    PROJECTION_FALLBACK_DISTANCE: 2.5
+
     DISTANCE_LOOK_AHEAD: 0.8
     PID_P: 0.25
 

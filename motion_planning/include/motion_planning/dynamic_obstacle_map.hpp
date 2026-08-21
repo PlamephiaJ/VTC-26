@@ -3,6 +3,7 @@
 
 #include "geometry_msgs/msg/point.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 
 #include <vector>
 
@@ -10,10 +11,20 @@ namespace dynamic_obstacles
 {
 
 /**
+ * Convert valid planar laser ranges into points in the laser frame.
+ *
+ * Input: LaserScan message and positive maximum accepted range.
+ * Return: Cartesian hit points for finite ranges at or below the limit.
+ * NaN, infinity, and farther readings are omitted.
+ */
+std::vector<geometry_msgs::msg::Point> valid_hit_points(
+    const sensor_msgs::msg::LaserScan& scan, double maximum_range);
+
+/**
  * Owns the immutable base map and the mutable live-obstacle collision layer.
  *
- * ROS callbacks provide already-transformed hit points. This class performs
- * only occupancy-map mutation and can therefore be tested independently.
+ * Together with valid_hit_points(), this module owns the complete scan-to-map
+ * obstacle pipeline except TF, which remains in the ROS node.
  */
 class MapLayer
 {

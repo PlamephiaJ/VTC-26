@@ -1,9 +1,10 @@
 #include "motion_planning/dynamic_obstacle_map.hpp"
-#include "motion_planning/goal_selector.hpp"
-#include "motion_planning/path_processing.hpp"
+#include "motion_planning/occupancy_grid.hpp"
+#include "motion_planning/optimal_trajectory.hpp"
+#include "motion_planning/path_tracking.hpp"
+#include "motion_planning/reference_path_manager.hpp"
 #include "motion_planning/rrt_star_planner.hpp"
 #include "motion_planning/rrt_tree.hpp"
-#include "motion_planning/scan_processing.hpp"
 
 #include "gtest/gtest.h"
 
@@ -22,6 +23,18 @@ nav_msgs::msg::OccupancyGrid make_free_grid()
     grid.info.resolution = 0.5;
     grid.info.origin.position.x = -5.0;
     grid.info.origin.position.y = -5.0;
+    grid.data.resize(grid.info.width * grid.info.height, 0);
+    return grid;
+}
+
+nav_msgs::msg::OccupancyGrid make_precise_grid()
+{
+    nav_msgs::msg::OccupancyGrid grid;
+    grid.info.width = 100;
+    grid.info.height = 100;
+    grid.info.resolution = 0.1;
+    grid.info.origin.position.x = -2.0;
+    grid.info.origin.position.y = -2.0;
     grid.data.resize(grid.info.width * grid.info.height, 0);
     return grid;
 }
@@ -77,12 +90,12 @@ TEST(RrtTree, ReparentMaintainsLinksAndDescendantCosts)
     EXPECT_DOUBLE_EQ(3.5, tree.at(4).cost);
 }
 
-TEST(PathProcessing, ResamplingBoundsSpacingAndPreservesEndpoints)
+TEST(PathTracking, ResamplingBoundsSpacingAndPreservesEndpoints)
 {
     const std::vector<geometry_msgs::msg::Point> input = {
         point(0.0, 0.0), point(1.0, 0.0)};
 
-    const auto result = path_processing::resample_polyline(input, 0.3);
+    const auto result = path_tracking::resample_polyline(input, 0.3);
 
     ASSERT_EQ(5u, result.size());
     EXPECT_DOUBLE_EQ(0.0, result.front().x);
@@ -93,7 +106,7 @@ TEST(PathProcessing, ResamplingBoundsSpacingAndPreservesEndpoints)
     }
 }
 
-TEST(ScanProcessing, FiltersInvalidAndFarRanges)
+TEST(DynamicObstacles, FiltersInvalidAndFarScanRanges)
 {
     constexpr double half_pi = 1.57079632679489661923;
     sensor_msgs::msg::LaserScan scan;
@@ -103,7 +116,7 @@ TEST(ScanProcessing, FiltersInvalidAndFarRanges)
         1.0F, std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::quiet_NaN(), 5.0F};
 
-    const auto hits = scan_processing::valid_hit_points(scan, 2.0);
+    const auto hits = dynamic_obstacles::valid_hit_points(scan, 2.0);
 
     ASSERT_EQ(1u, hits.size());
     EXPECT_NEAR(1.0, hits.front().x, 1e-6);
@@ -124,22 +137,133 @@ TEST(DynamicObstacleMap, ClearingObservationRestoresStaticLayer)
     EXPECT_EQ(0, layer.collision_map().data.at(210));
 }
 
-TEST(GoalSelector, ChoosesForwardWaypointNearConfiguredRange)
+TEST(OptimalTrajectory, ProjectsSamplesAndSlicesByArcLength)
 {
-    goal_selection::Selector selector(3.5);
     const std::vector<geometry_msgs::msg::Point> waypoints = {
-        point(-1.0, 0.0), point(1.0, 0.0), point(2.0, 0.0), point(3.4, 0.0)};
-    geometry_msgs::msg::Pose pose;
-    pose.orientation.w = 1.0;
-    geometry_msgs::msg::TransformStamped map_to_vehicle;
-    map_to_vehicle.transform.rotation.w = 1.0;
+        point(0.0, 0.0), point(10.0, 0.0),
+        point(10.0, 10.0), point(0.0, 10.0)};
+    optimal_trajectory::Trajectory trajectory(waypoints);
 
-    const auto result = selector.update(
-        waypoints, pose, make_free_grid(), map_to_vehicle);
+    const auto projection = trajectory.project(
+        point(2.0, 1.0), std::nullopt, 2.0, 8.0, 2.5);
+    const auto sampled = trajectory.point_at(12.0);
+    const auto sliced = trajectory.slice(9.0, 3.0);
 
-    ASSERT_TRUE(result.index.has_value());
-    EXPECT_EQ(goal_selection::Status::success, result.status);
-    EXPECT_EQ(3u, *result.index);
+    EXPECT_DOUBLE_EQ(40.0, trajectory.total_length());
+    EXPECT_DOUBLE_EQ(2.0, projection.progress);
+    EXPECT_DOUBLE_EQ(2.0, projection.point.x);
+    EXPECT_DOUBLE_EQ(0.0, projection.point.y);
+    EXPECT_DOUBLE_EQ(1.0, projection.distance);
+    EXPECT_DOUBLE_EQ(10.0, sampled.x);
+    EXPECT_DOUBLE_EQ(2.0, sampled.y);
+    ASSERT_EQ(3u, sliced.size());
+    EXPECT_DOUBLE_EQ(9.0, sliced.front().x);
+    EXPECT_DOUBLE_EQ(10.0, sliced.at(1).x);
+    EXPECT_DOUBLE_EQ(2.0, sliced.back().y);
+}
+
+TEST(OptimalTrajectory, SliceWrapsAcrossLapBoundary)
+{
+    const optimal_trajectory::Trajectory trajectory({
+        point(0.0, 0.0), point(10.0, 0.0),
+        point(10.0, 10.0), point(0.0, 10.0)});
+
+    const auto sliced = trajectory.slice(39.0, 3.0);
+
+    ASSERT_EQ(3u, sliced.size());
+    EXPECT_DOUBLE_EQ(0.0, sliced.front().x);
+    EXPECT_DOUBLE_EQ(1.0, sliced.front().y);
+    EXPECT_DOUBLE_EQ(0.0, sliced.at(1).x);
+    EXPECT_DOUBLE_EQ(0.0, sliced.at(1).y);
+    EXPECT_DOUBLE_EQ(2.0, sliced.back().x);
+    EXPECT_DOUBLE_EQ(0.0, sliced.back().y);
+}
+
+TEST(OptimalTrajectory, RemovesOverlappingPrefixBeforeLapBoundary)
+{
+    // The first three points are a pre-roll which is traversed again at the
+    // end. Blindly connecting the final point to the first would create a
+    // two-metre backward segment at progress zero.
+    const optimal_trajectory::Trajectory trajectory({
+        point(2.0, 0.0), point(1.0, 0.0), point(0.0, 0.0),
+        point(0.0, -1.0), point(1.0, -1.0), point(2.0, -1.0),
+        point(2.0, 0.0), point(1.0, 0.0), point(0.0, 0.0)});
+
+    const auto across_zero = trajectory.slice(5.5, 1.0);
+
+    EXPECT_EQ(2u, trajectory.removed_prefix_point_count());
+    EXPECT_DOUBLE_EQ(6.0, trajectory.total_length());
+    ASSERT_EQ(3u, across_zero.size());
+    EXPECT_DOUBLE_EQ(0.5, across_zero.front().x);
+    EXPECT_DOUBLE_EQ(0.0, across_zero.front().y);
+    EXPECT_DOUBLE_EQ(0.0, across_zero.at(1).x);
+    EXPECT_DOUBLE_EQ(0.0, across_zero.at(1).y);
+    EXPECT_DOUBLE_EQ(0.0, across_zero.back().x);
+    EXPECT_DOUBLE_EQ(-0.5, across_zero.back().y);
+}
+
+TEST(ReferencePathManager, UsesOptimalReferenceWhenForwardArcIsClear)
+{
+    reference_path::ManagerConfig config;
+    config.global_goal_distance = 3.0;
+    reference_path::Manager manager({
+        point(0.0, 0.0), point(4.0, 0.0),
+        point(4.0, 4.0), point(0.0, 4.0)}, config);
+
+    const auto decision = manager.update(point(0.0, 0.0), make_precise_grid());
+
+    EXPECT_EQ(reference_path::Mode::optimal_reference, decision.mode);
+    EXPECT_FALSE(decision.mode_changed);
+    EXPECT_TRUE(decision.optimal_arc_clear);
+    ASSERT_FALSE(decision.local_optimal_reference.empty());
+    EXPECT_DOUBLE_EQ(0.0, decision.local_optimal_reference.front().x);
+    EXPECT_DOUBLE_EQ(3.0, decision.local_optimal_reference.back().x);
+    EXPECT_DOUBLE_EQ(3.0, decision.global_goal.x);
+}
+
+TEST(ReferencePathManager, UsesRrtOnlyUntilSafeOptimalRejoin)
+{
+    reference_path::ManagerConfig config;
+    config.global_goal_distance = 3.0;
+    config.rejoin_distance = 0.5;
+    config.progress_search_backward = 2.0;
+    config.progress_search_forward = 8.0;
+    config.projection_fallback_distance = 2.5;
+    reference_path::Manager manager({
+        point(0.0, 0.0), point(4.0, 0.0),
+        point(4.0, 4.0), point(0.0, 4.0)}, config);
+    auto grid = make_precise_grid();
+
+    occupancy_grid::set_xy_coord_occupied(grid, 2.0, 0.0);
+    const auto blocked = manager.update(point(0.0, 0.0), grid);
+    EXPECT_EQ(reference_path::Mode::rrt_detour, blocked.mode);
+    EXPECT_TRUE(blocked.mode_changed);
+    EXPECT_FALSE(blocked.optimal_arc_clear);
+    EXPECT_DOUBLE_EQ(3.0, blocked.global_goal.x);
+    EXPECT_DOUBLE_EQ(0.0, blocked.global_goal.y);
+
+    std::fill(grid.data.begin(), grid.data.end(), 0);
+    const auto too_far = manager.update(point(2.0, 2.0), grid);
+    EXPECT_EQ(reference_path::Mode::rrt_detour, too_far.mode);
+    EXPECT_TRUE(too_far.optimal_arc_clear);
+    EXPECT_FALSE(too_far.vehicle_near_optimal);
+
+    occupancy_grid::set_xy_coord_occupied(grid, 2.0, 0.2);
+    const auto unsafe_connector = manager.update(point(2.0, 0.4), grid);
+    EXPECT_EQ(reference_path::Mode::rrt_detour, unsafe_connector.mode);
+    EXPECT_TRUE(unsafe_connector.optimal_arc_clear);
+    EXPECT_TRUE(unsafe_connector.vehicle_near_optimal);
+    EXPECT_FALSE(unsafe_connector.rejoin_connector_clear);
+    EXPECT_DOUBLE_EQ(4.0, unsafe_connector.global_goal.x);
+    EXPECT_DOUBLE_EQ(1.0, unsafe_connector.global_goal.y);
+
+    std::fill(grid.data.begin(), grid.data.end(), 0);
+    const auto rejoined = manager.update(point(2.0, 0.4), grid);
+    EXPECT_EQ(reference_path::Mode::optimal_reference, rejoined.mode);
+    EXPECT_TRUE(rejoined.mode_changed);
+    EXPECT_TRUE(rejoined.optimal_arc_clear);
+    EXPECT_TRUE(rejoined.vehicle_near_optimal);
+    EXPECT_TRUE(rejoined.rejoin_connector_clear);
 }
 
 TEST(RrtStarPlanner, FindsDirectPathInFreeMap)

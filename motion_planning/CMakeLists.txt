@@ -39,15 +39,13 @@ include_directories(
 # Algorithm modules are kept in a ROS-node-independent static library so they
 # can be tested and optimized without constructing an rclcpp::Node.
 add_library(motion_planning_core STATIC
-  src/collision_checker.cpp
   src/dynamic_obstacle_map.cpp
-  src/goal_selector.cpp
   src/occupancy_grid.cpp
-  src/path_processing.cpp
+  src/optimal_trajectory.cpp
   src/path_tracking.cpp
+  src/reference_path_manager.cpp
   src/rrt_star_planner.cpp
-  src/rrt_tree.cpp
-  src/scan_processing.cpp)
+  src/rrt_tree.cpp)
 target_include_directories(motion_planning_core PUBLIC include)
 ament_target_dependencies(motion_planning_core
   geometry_msgs nav_msgs sensor_msgs tf2 tf2_geometry_msgs)
