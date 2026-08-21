@@ -1,5 +1,38 @@
 launch:
-  namespace: ego_racecar
+  # Select how many configured vehicles to launch. Valid values: 1 or 2.
+  vehicle_mode: 2
+
+  # One RRT process is created for each enabled entry. Algorithm parameters
+  # below are shared; ros__parameters here only override the vehicle I/O. In
+  # one-car mode only the first enabled entry is used.
+  vehicles:
+    - namespace: ego_racecar
+      node_name: rrt_node
+      ros__parameters:
+        odom_topic: /ego_racecar/odom
+        map_topic: /map
+        scan_topic: /scan
+        dynamic_map_topic: /ego_racecar/dynamic_map
+        drive_topic: /drive
+        control_topic: /ego_racecar/control
+        # Commanded speed in m/s for straight, medium, and sharp turns.
+        SPEED_STRAIGHT: 5.0
+        SPEED_MEDIUM_TURN: 3.0
+        SPEED_SHARP_TURN: 1.5
+
+    - namespace: opp_racecar
+      node_name: rrt_node
+      ros__parameters:
+        odom_topic: /opp_racecar/odom
+        map_topic: /map
+        scan_topic: /opp_scan
+        dynamic_map_topic: /opp_racecar/dynamic_map
+        drive_topic: /opp_drive
+        control_topic: /opp_racecar/control
+        # These can be tuned independently from the ego vehicle.
+        SPEED_STRAIGHT: 3.0
+        SPEED_MEDIUM_TURN: 2.0
+        SPEED_SHARP_TURN: 1.0
 
 rrt_node:
   ros__parameters:
@@ -33,9 +66,6 @@ rrt_node:
     DISTANCE_LOOK_AHEAD: 0.8
     PID_P: 0.25
 
-    odom_topic: /ego_racecar/odom
-    map_topic: /map
-    scan_topic: /scan
-    dynamic_map_topic: /ego_racecar/dynamic_map
-    drive_topic: /drive
-    control_topic: /ego_racecar/control
+    # Shared steering thresholds used to select the three speed levels above.
+    SPEED_LOW_STEERING_THRESHOLD_DEGREES: 10.0
+    SPEED_MEDIUM_STEERING_THRESHOLD_DEGREES: 20.0

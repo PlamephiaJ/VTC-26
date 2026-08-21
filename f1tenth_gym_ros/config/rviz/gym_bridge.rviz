@@ -343,6 +343,92 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ego_racecar/tree_nodes
       Value: true
+    - Alpha: 0.3499999940395355
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: false
+      Enabled: false
+      Name: Opponent Dynamic Map
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/dynamic_map
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/dynamic_map_updates
+      Use Timestamp: false
+      Value: false
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Opponent Goal
+      Namespaces:
+        goal: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/goal
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Opponent Lookahead
+      Namespaces:
+        lookahead: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/lookahead
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Opponent Path
+      Namespaces:
+        path: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/path
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Opponent Tree Branches
+      Namespaces:
+        branch: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/tree_branches
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Opponent Tree Nodes
+      Namespaces:
+        nodes: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /opp_racecar/tree_nodes
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

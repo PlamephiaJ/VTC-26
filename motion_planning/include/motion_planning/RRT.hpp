@@ -3,6 +3,7 @@
 
 #include "motion_planning/Visualization.hpp"
 #include "motion_planning/dynamic_obstacle_map.hpp"
+#include "motion_planning/path_tracking.hpp"
 #include "motion_planning/reference_path_manager.hpp"
 #include "motion_planning/rrt_star_planner.hpp"
 
@@ -71,6 +72,7 @@ private:
     double lookahead_distance_ = 0.4;
     double pursuit_gain_ = 0.25;
     double steering_limit_ = 0.41;
+    path_tracking::SpeedProfile speed_profile_;
 
     // ROS names and runtime state.
     std::string odom_topic_ = "/ego_racecar/odom";

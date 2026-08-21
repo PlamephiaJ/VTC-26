@@ -65,3 +65,43 @@ Each public declaration documents:
 Algorithm modules do not publish ROS messages, query TF, or log. Those effects
 remain in `RRT`, which makes module tests deterministic and keeps optimization
 work localized.
+
+## Running two vehicles
+
+`launch/rrt.launch.py` accepts a `launch.vehicles` list in the selected YAML.
+Set `launch.vehicle_mode` to `1` to launch only the first enabled vehicle, or
+to `2` to launch the first two. It starts a separate `rrt_node_sim` process for
+each selected car. The parameters under `rrt_node.ros__parameters` are shared
+by all instances, while each vehicle's `ros__parameters` override its odometry,
+scan, drive, dynamic-map, and control topics.
+
+The shipped `config/rrt.yaml` connects the two default gym agents as follows:
+
+| RRT namespace | Odometry | Laser scan | Drive command | Start/stop control |
+|---|---|---|---|---|
+| `/ego_racecar` | `/ego_racecar/odom` | `/scan` | `/drive` | `/ego_racecar/control` |
+| `/opp_racecar` | `/opp_racecar/odom` | `/opp_scan` | `/opp_drive` | `/opp_racecar/control` |
+
+Each vehicle entry also owns its `SPEED_STRAIGHT`, `SPEED_MEDIUM_TURN`, and
+`SPEED_SHARP_TURN` values in metres per second. The shared low/medium steering
+thresholds select between those three levels. Speed values must satisfy
+`straight >= medium turn >= sharp turn > 0`.
+
+Both nodes share `/map`, but keep their dynamic maps and all relative
+visualization topics inside their own namespaces. The node derives each
+vehicle's TF frames from its namespace (`<namespace>/base_link` and
+`<namespace>/laser`). The original single-car `launch.namespace` YAML format
+is still supported when `launch.vehicles` is absent.
+
+With the default safety setting (`start_on_launch: false`), start or stop each
+car independently, or use the repository-level `startrun.sh` and `stoprun.sh`
+scripts to send the command to both cars concurrently:
+
+```bash
+ros2 topic pub --once /ego_racecar/control std_msgs/msg/String "{data: start}"
+ros2 topic pub --once /opp_racecar/control std_msgs/msg/String "{data: start}"
+ros2 topic pub --once /ego_racecar/control std_msgs/msg/String "{data: stop}"
+ros2 topic pub --once /opp_racecar/control std_msgs/msg/String "{data: stop}"
+./startrun.sh
+./stoprun.sh
+```

@@ -185,6 +185,45 @@ void RRT::load_parameters()
         throw std::invalid_argument("Bad configuration. PID_P must be > 0.");
     }
 
+    this->declare_parameter(
+        "SPEED_LOW_STEERING_THRESHOLD_DEGREES",
+        speed_profile_.low_steering_threshold_degrees);
+    speed_profile_.low_steering_threshold_degrees = this->get_parameter(
+        "SPEED_LOW_STEERING_THRESHOLD_DEGREES").as_double();
+    this->declare_parameter(
+        "SPEED_MEDIUM_STEERING_THRESHOLD_DEGREES",
+        speed_profile_.medium_steering_threshold_degrees);
+    speed_profile_.medium_steering_threshold_degrees = this->get_parameter(
+        "SPEED_MEDIUM_STEERING_THRESHOLD_DEGREES").as_double();
+    if (speed_profile_.low_steering_threshold_degrees < 0.0 ||
+        speed_profile_.medium_steering_threshold_degrees <=
+        speed_profile_.low_steering_threshold_degrees)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. Speed steering thresholds must satisfy "
+            "0 <= low < medium.");
+    }
+
+    this->declare_parameter("SPEED_STRAIGHT", speed_profile_.straight_speed);
+    speed_profile_.straight_speed =
+        this->get_parameter("SPEED_STRAIGHT").as_double();
+    this->declare_parameter(
+        "SPEED_MEDIUM_TURN", speed_profile_.medium_turn_speed);
+    speed_profile_.medium_turn_speed =
+        this->get_parameter("SPEED_MEDIUM_TURN").as_double();
+    this->declare_parameter(
+        "SPEED_SHARP_TURN", speed_profile_.sharp_turn_speed);
+    speed_profile_.sharp_turn_speed =
+        this->get_parameter("SPEED_SHARP_TURN").as_double();
+    if (speed_profile_.sharp_turn_speed <= 0.0 ||
+        speed_profile_.medium_turn_speed < speed_profile_.sharp_turn_speed ||
+        speed_profile_.straight_speed < speed_profile_.medium_turn_speed)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. Speeds must satisfy "
+            "straight >= medium turn >= sharp turn > 0.");
+    }
+
     this->declare_parameter("odom_topic", odom_topic_);
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     this->declare_parameter("map_topic", map_topic_);
@@ -565,7 +604,8 @@ void RRT::follow_path(const nav_msgs::msg::Path& path)
 
     ackermann_msgs::msg::AckermannDriveStamped command;
     command.header.stamp = this->now();
-    command.drive.speed = path_tracking::speed_for_steering(steering);
+    command.drive.speed = path_tracking::speed_for_steering(
+        steering, speed_profile_);
     command.drive.steering_angle = steering;
     command.drive.steering_angle_velocity = 1.0;
     if (is_vehicle_enabled_)
