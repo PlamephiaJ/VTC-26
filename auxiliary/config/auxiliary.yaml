@@ -1,0 +1,31 @@
+launch:
+  namespace: ego_racecar
+  start_recorder: false
+  start_displayer: true
+
+waypoint_recorder_node:
+  ros__parameters:
+    use_sim_time: false
+
+    # "auto" records periodically; "manual" records when manual_record_key is pressed.
+    mode: auto
+    sample_interval_second: 0.1
+    manual_record_key: r
+    enable_speed: true
+
+    map_frame_name: map
+    vehicle_frame_name: ego_racecar/base_link
+    odom_topic: /ego_racecar/odom
+
+    # The directory must already exist and be writable.
+    output_directory: /home/plamephia/workspace/sim_ws/waypoint
+
+waypoint_displayer_node:
+  ros__parameters:
+    use_sim_time: false
+    map_frame_name: map
+    waypoint_file_path: /home/plamephia/workspace/sim_ws/waypoint/Spielberg_map/clockwise_waypoints_0.0s_Fri_Jun_21_10:09:43_2024.csv
+    color_r: 1.0
+    color_g: 0.8
+    color_b: 0.0
+    publish_interval_second: 5.0

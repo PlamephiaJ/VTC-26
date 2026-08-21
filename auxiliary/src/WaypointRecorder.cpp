@@ -6,10 +6,14 @@
  * @FilePath: /auxiliary/src/WaypointRecorder.cpp
  * @Description: Auxiliary node for recording the vehicle position in the simulator.
  * This position is collected by using tf2 transformation.
- * Make sure to have /sim_ws/waypoint directory to store the position csv files.
+ * The output directory is configured through the output_directory parameter.
  */
 
 #include "../include/auxiliary/WaypointRecorder.hpp"
+
+#include <cstdio>
+#include <ctime>
+#include <stdexcept>
 
 void WaypointRecorder::on_timer_auto()
 {
@@ -24,7 +28,9 @@ void WaypointRecorder::on_timer_auto()
     }
     catch(const tf2::TransformException & e)
     {
-        RCLCPP_INFO(this->get_logger(), "Could not transform %s to %s: %s", target_frame, source_frame, e.what());
+        RCLCPP_INFO(
+            this->get_logger(), "Could not transform %s to %s: %s",
+            target_frame.c_str(), source_frame.c_str(), e.what());
         return;
     }
 
@@ -34,19 +40,23 @@ void WaypointRecorder::on_timer_auto()
     if (enable_speed_)
     {
         file_ << x << "," << y << "," << current_speed_ << "\n";
-        RCLCPP_INFO(this->get_logger(), "Waypoint No.: %d, logging: %f, %f, %f.", waypoint_num_, x, y, current_speed_);
+        RCLCPP_INFO(
+            this->get_logger(), "Waypoint No.: %llu, logging: %f, %f, %f.",
+            waypoint_num_, x, y, current_speed_);
     }
     else
     {
         file_ << x << "," << y << "\n";
-        RCLCPP_INFO(this->get_logger(), "Waypoint No.: %d, logging: %f, %f", waypoint_num_, x, y);
+        RCLCPP_INFO(
+            this->get_logger(), "Waypoint No.: %llu, logging: %f, %f",
+            waypoint_num_, x, y);
     }
 
     waypoint_num_++;
     marker_.id++;
     marker_.header.stamp = this->get_clock().get()->now();
     marker_.pose.position.x = x; marker_.pose.position.y = y; marker_.pose.position.z = 0;
-    marker_.pose.orientation.x = 0; marker_.pose.orientation.y = 0; marker_.pose.orientation.z = 0; marker_.pose.orientation.w = 0;
+    marker_.pose.orientation.x = 0; marker_.pose.orientation.y = 0; marker_.pose.orientation.z = 0; marker_.pose.orientation.w = 1;
     marker_publisher_->publish(marker_);
 }
 
@@ -76,19 +86,23 @@ void WaypointRecorder::on_timer_manual()
         if (enable_speed_)
         {
             file_ << x << "," << y << "," << current_speed_ << "\n";
-            RCLCPP_INFO(this->get_logger(), "Waypoint No.: %d, logging: %f, %f, %f.", waypoint_num_, x, y, current_speed_);
+            RCLCPP_INFO(
+                this->get_logger(), "Waypoint No.: %llu, logging: %f, %f, %f.",
+                waypoint_num_, x, y, current_speed_);
         }
         else
         {
             file_ << x << "," << y << "\n";
-            RCLCPP_INFO(this->get_logger(), "Waypoint No.: %d, logging: %f, %f", waypoint_num_, x, y);
+            RCLCPP_INFO(
+                this->get_logger(), "Waypoint No.: %llu, logging: %f, %f",
+                waypoint_num_, x, y);
         }
 
         waypoint_num_++;
         marker_.id++;
         marker_.header.stamp = this->get_clock().get()->now();
         marker_.pose.position.x = x; marker_.pose.position.y = y; marker_.pose.position.z = 0;
-        marker_.pose.orientation.x = 0; marker_.pose.orientation.y = 0; marker_.pose.orientation.z = 0; marker_.pose.orientation.w = 0;
+        marker_.pose.orientation.x = 0; marker_.pose.orientation.y = 0; marker_.pose.orientation.z = 0; marker_.pose.orientation.w = 1;
         marker_publisher_->publish(marker_);
     }
 }
@@ -110,7 +124,7 @@ std::string WaypointRecorder::generate_waypoint_file_path()
         }
     }
 
-    std::string path = "/sim_ws/waypoint/waypoints_" + s + "s_" + time_string + ".csv";
+    std::string path = output_directory_ + "/waypoints_" + s + "s_" + time_string + ".csv";
     RCLCPP_INFO_STREAM(this->get_logger(), path);
     return path;
 }
@@ -122,58 +136,73 @@ void WaypointRecorder::odom_callback(const nav_msgs::msg::Odometry::ConstSharedP
 
 WaypointRecorder::WaypointRecorder() : Node("waypoint_recorder_node")
 {
-    this->declare_parameter("mode");
-    this->declare_parameter("map_frame_name");
-    this->declare_parameter("sample_interval_second");
-    this->declare_parameter("manual_record_key");
-    this->declare_parameter("enable_speed");
+    mode_ = this->declare_parameter<std::string>("mode", "auto");
+    map_frame_ = this->declare_parameter<std::string>("map_frame_name", "map");
+    sample_interval_s_ = this->declare_parameter<double>("sample_interval_second", 0.1);
+    const auto manual_record_key =
+        this->declare_parameter<std::string>("manual_record_key", "r");
+    enable_speed_ = this->declare_parameter<bool>("enable_speed", true);
+    output_directory_ =
+        this->declare_parameter<std::string>("output_directory", "/sim_ws/waypoint");
+    vehicle_frame_ = this->declare_parameter<std::string>("vehicle_frame_name", "");
+    odom_topic_ = this->declare_parameter<std::string>("odom_topic", "");
 
-    map_frame_ = this->get_parameter("map_frame_name").as_string();
-    if (mode_ == "auto")
-    {
-        vehicle_frame_ = this->get_namespace() + vehicle_frame_;
-        vehicle_frame_ = vehicle_frame_.substr(1);
-    }
-    else
-    {
-        vehicle_frame_ = "car0" + vehicle_frame_;
-    }
-
-    mode_ = this->get_parameter("mode").as_string();
     if (!(mode_ == "auto" || mode_ == "manual"))
     {
-        RCLCPP_ERROR(this->get_logger(), "Invalid parameter: mode_ must be \"auto\" or \"manual\". Your configuration: %s", mode_);
-        return;
+        throw std::invalid_argument(
+            "mode must be \"auto\" or \"manual\". Current value: " + mode_);
     }
 
-    sample_interval_s_ = this->get_parameter("sample_interval_second").as_double();
-    if (sample_interval_s_ < 0)
+    if (mode_ == "auto" && sample_interval_s_ <= 0.0)
     {
-        RCLCPP_ERROR(this->get_logger(), "Invalid parameter: sample_interval_second must >= 0.");
-        return;
+        throw std::invalid_argument(
+            "sample_interval_second must be greater than 0 in auto mode.");
     }
 
     if (mode_ == "manual")
     {
-        std::string c_input_string = this->get_parameter("manual_record_key").as_string();
-        c_input_ = c_input_string[0];
+        if (manual_record_key.empty())
+        {
+            throw std::invalid_argument("manual_record_key cannot be empty in manual mode.");
+        }
+        c_input_ = manual_record_key[0];
     }
 
-    enable_speed_ = this->get_parameter("enable_speed").as_bool();
+    if (output_directory_.empty())
+    {
+        throw std::invalid_argument("output_directory cannot be empty.");
+    }
+    if (output_directory_.size() > 1 && output_directory_.back() == '/')
+    {
+        output_directory_.pop_back();
+    }
 
-    std::chrono::milliseconds interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<double>(sample_interval_s_));
+    const auto node_namespace = std::string(this->get_namespace());
+    const auto namespaced_prefix =
+        node_namespace == "/" ? "" : node_namespace.substr(1) + "/";
+    if (vehicle_frame_.empty())
+    {
+        vehicle_frame_ = mode_ == "auto" ? namespaced_prefix + "base_link" : "car0/base_link";
+    }
+    if (odom_topic_.empty())
+    {
+        odom_topic_ = mode_ == "auto" ? "odom" : "/car0/odom";
+    }
+
+    const auto interval = std::chrono::duration<double>(sample_interval_s_);
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     file_path_ = generate_waypoint_file_path();
+    tmpfilename_ = output_directory_ + "/temp.csv";
 
     std::ifstream file(tmpfilename_);
     if (file.good())
     {
         if (remove(tmpfilename_.c_str()) != 0)
         {
-            throw "Couldn't remove existing temp file.";
+            throw std::runtime_error("Couldn't remove existing temp file: " + tmpfilename_);
         }
     }
     file.close();
@@ -182,8 +211,8 @@ WaypointRecorder::WaypointRecorder() : Node("waypoint_recorder_node")
 
     if (!file_.is_open())
     {
-        RCLCPP_ERROR(this->get_logger(), "Failed to open the temp csv file_! Exiting...");
-        return;
+        throw std::runtime_error(
+            "Failed to open the temp csv file. Check output_directory: " + output_directory_);
     }
 
     std::vector<std::string> column_names = {"x", "y"};
@@ -202,19 +231,11 @@ WaypointRecorder::WaypointRecorder() : Node("waypoint_recorder_node")
     }
     file_ << "\n";
 
-    if (mode_ == "auto")
-    {
-        odom_topic_ = this->get_namespace() + odom_topic_;
-    }
-    else
-    {
-        odom_topic_ = "/car0" + odom_topic_;
-    }
-
-    marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("waypoint_marker", 10);
+    marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(
+        "waypoint_marker", rclcpp::QoS(1000).transient_local().reliable());
     subscriber_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(odom_topic_, 1, std::bind(&WaypointRecorder::odom_callback, this, std::placeholders::_1));
 
-    marker_.header.frame_id = "map";
+    marker_.header.frame_id = map_frame_;
     marker_.id = 0;
     marker_.type = visualization_msgs::msg::Marker::SPHERE;
     marker_.action = visualization_msgs::msg::Marker::ADD;
@@ -224,21 +245,28 @@ WaypointRecorder::WaypointRecorder() : Node("waypoint_recorder_node")
 
     if (mode_ == "auto")
     {
-        timer_ = this->create_wall_timer(interval_ms, [this]() {return this->on_timer_auto();});
+        timer_ = this->create_wall_timer(interval, [this]() {return this->on_timer_auto();});
     }
     else if (mode_ == "manual")
     {
-        tcgetattr(STDIN_FILENO, &orig_termios_);
+        if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &orig_termios_) != 0)
+        {
+            throw std::runtime_error("manual mode requires an interactive terminal.");
+        }
         struct termios new_termios = orig_termios_;
         new_termios.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &new_termios) != 0)
+        {
+            throw std::runtime_error("Couldn't configure the terminal for manual mode.");
+        }
+        terminal_configured_ = true;
         timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&WaypointRecorder::on_timer_manual, this));
     }
 }
 
 WaypointRecorder::~WaypointRecorder()
 {
-    if (mode_ == "manual")
+    if (terminal_configured_)
     {
         tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios_);
     }
