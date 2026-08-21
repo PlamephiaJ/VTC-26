@@ -12,105 +12,12 @@ namespace
 {
 
 constexpr double epsilon = 1e-9;
-constexpr double minimum_overlap_tolerance = 1e-3;
-constexpr double maximum_overlap_tolerance = 5e-2;
-constexpr double minimum_direction_alignment = 0.8;
 
 double distance_between(
     const geometry_msgs::msg::Point& first,
     const geometry_msgs::msg::Point& second)
 {
     return std::hypot(first.x - second.x, first.y - second.y);
-}
-
-double median_segment_length(
-    const std::vector<geometry_msgs::msg::Point>& points)
-{
-    std::vector<double> lengths;
-    lengths.reserve(points.size() - 1);
-    for (std::size_t i = 1; i < points.size(); ++i)
-    {
-        const double length = distance_between(points.at(i - 1), points.at(i));
-        if (length > epsilon)
-        {
-            lengths.emplace_back(length);
-        }
-    }
-    const auto middle = lengths.begin() + lengths.size() / 2;
-    std::nth_element(lengths.begin(), middle, lengths.end());
-    return *middle;
-}
-
-struct PrefixOverlap
-{
-    std::size_t segment_index = 0;
-    double distance = std::numeric_limits<double>::max();
-};
-
-/**
- * Find a same-direction early segment containing the final waypoint.
- *
- * Only the first half of the point sequence is searched. A valid match means
- * the file contains a pre-roll prefix followed by almost a full lap; nearby
- * segments at the normal end of the sequence cannot be mistaken for overlap.
- */
-std::optional<PrefixOverlap> find_overlapping_prefix(
-    const std::vector<geometry_msgs::msg::Point>& points,
-    const double tolerance)
-{
-    const auto& final_point = points.back();
-    const auto& previous_point = points.at(points.size() - 2);
-    const double incoming_x = final_point.x - previous_point.x;
-    const double incoming_y = final_point.y - previous_point.y;
-    const double incoming_length = std::hypot(incoming_x, incoming_y);
-    if (incoming_length <= epsilon)
-    {
-        return std::nullopt;
-    }
-
-    PrefixOverlap best;
-    const std::size_t candidate_end = points.size() / 2;
-    for (std::size_t i = 0; i + 1 < candidate_end; ++i)
-    {
-        const auto& start = points.at(i);
-        const auto& end = points.at(i + 1);
-        const double dx = end.x - start.x;
-        const double dy = end.y - start.y;
-        const double length_squared = dx * dx + dy * dy;
-        if (length_squared <= epsilon * epsilon)
-        {
-            continue;
-        }
-
-        const double alignment =
-            (dx * incoming_x + dy * incoming_y) /
-            (std::sqrt(length_squared) * incoming_length);
-        if (alignment < minimum_direction_alignment)
-        {
-            continue;
-        }
-
-        const double ratio = std::clamp(
-            ((final_point.x - start.x) * dx +
-             (final_point.y - start.y) * dy) /
-                length_squared,
-            0.0, 1.0);
-        geometry_msgs::msg::Point projected;
-        projected.x = start.x + ratio * dx;
-        projected.y = start.y + ratio * dy;
-        const double distance = distance_between(final_point, projected);
-        if (distance < best.distance)
-        {
-            best.segment_index = i;
-            best.distance = distance;
-        }
-    }
-
-    if (best.distance <= tolerance)
-    {
-        return best;
-    }
-    return std::nullopt;
 }
 
 }  // namespace
@@ -126,42 +33,15 @@ Trajectory::Trajectory(
             points_.emplace_back(waypoint);
         }
     }
+    if (points_.size() > 1 &&
+        distance_between(points_.front(), points_.back()) <= epsilon)
+    {
+        points_.pop_back();
+    }
     if (points_.size() < 2)
     {
         throw std::invalid_argument(
             "Optimal trajectory requires at least two distinct points");
-    }
-
-    const double representative_spacing = median_segment_length(points_);
-    const double overlap_tolerance = std::clamp(
-        0.5 * representative_spacing,
-        minimum_overlap_tolerance, maximum_overlap_tolerance);
-    if (distance_between(points_.front(), points_.back()) <= overlap_tolerance)
-    {
-        points_.pop_back();
-    }
-    else if (const auto overlap =
-                 find_overlapping_prefix(points_, overlap_tolerance))
-    {
-        std::vector<geometry_msgs::msg::Point> one_lap;
-        one_lap.reserve(points_.size() - overlap->segment_index);
-        one_lap.emplace_back(points_.back());
-        for (std::size_t i = overlap->segment_index + 1;
-             i + 1 < points_.size(); ++i)
-        {
-            if (distance_between(one_lap.back(), points_.at(i)) > epsilon)
-            {
-                one_lap.emplace_back(points_.at(i));
-            }
-        }
-        removed_prefix_point_count_ = overlap->segment_index + 1;
-        points_ = std::move(one_lap);
-    }
-    if (points_.size() < 2)
-    {
-        throw std::invalid_argument(
-            "Optimal trajectory requires at least two distinct points after "
-            "closed-lap normalization");
     }
 
     cumulative_lengths_.emplace_back(0.0);
@@ -183,11 +63,6 @@ Trajectory::Trajectory(
 double Trajectory::total_length() const
 {
     return total_length_;
-}
-
-std::size_t Trajectory::removed_prefix_point_count() const
-{
-    return removed_prefix_point_count_;
 }
 
 double Trajectory::normalize_progress(const double progress) const

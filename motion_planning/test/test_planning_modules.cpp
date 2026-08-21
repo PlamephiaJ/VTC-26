@@ -179,29 +179,6 @@ TEST(OptimalTrajectory, SliceWrapsAcrossLapBoundary)
     EXPECT_DOUBLE_EQ(0.0, sliced.back().y);
 }
 
-TEST(OptimalTrajectory, RemovesOverlappingPrefixBeforeLapBoundary)
-{
-    // The first three points are a pre-roll which is traversed again at the
-    // end. Blindly connecting the final point to the first would create a
-    // two-metre backward segment at progress zero.
-    const optimal_trajectory::Trajectory trajectory({
-        point(2.0, 0.0), point(1.0, 0.0), point(0.0, 0.0),
-        point(0.0, -1.0), point(1.0, -1.0), point(2.0, -1.0),
-        point(2.0, 0.0), point(1.0, 0.0), point(0.0, 0.0)});
-
-    const auto across_zero = trajectory.slice(5.5, 1.0);
-
-    EXPECT_EQ(2u, trajectory.removed_prefix_point_count());
-    EXPECT_DOUBLE_EQ(6.0, trajectory.total_length());
-    ASSERT_EQ(3u, across_zero.size());
-    EXPECT_DOUBLE_EQ(0.5, across_zero.front().x);
-    EXPECT_DOUBLE_EQ(0.0, across_zero.front().y);
-    EXPECT_DOUBLE_EQ(0.0, across_zero.at(1).x);
-    EXPECT_DOUBLE_EQ(0.0, across_zero.at(1).y);
-    EXPECT_DOUBLE_EQ(0.0, across_zero.back().x);
-    EXPECT_DOUBLE_EQ(-0.5, across_zero.back().y);
-}
-
 TEST(ReferencePathManager, UsesOptimalReferenceWhenForwardArcIsClear)
 {
     reference_path::ManagerConfig config;

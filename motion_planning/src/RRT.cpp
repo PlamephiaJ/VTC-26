@@ -250,16 +250,6 @@ void RRT::initialize_algorithm_modules()
         projection_fallback_distance_;
     reference_manager_ = std::make_unique<reference_path::Manager>(
         global_waypoints_, reference_config);
-    const std::size_t removed_prefix =
-        reference_manager_->removed_prefix_point_count();
-    if (removed_prefix > 0)
-    {
-        RCLCPP_INFO(
-            this->get_logger(),
-            "Normalized closed optimal trajectory: removed %zu overlapping "
-            "pre-roll waypoints",
-            removed_prefix);
-    }
 }
 
 void RRT::initialize_ros_interfaces()

@@ -22,31 +22,24 @@ struct Projection
 /**
  * Precomputed cyclic optimal trajectory parameterized by planar arc length.
  *
- * Construction removes consecutive duplicate points and an optional
- * overlapping pre-roll prefix, then precomputes segment lengths/cumulative
- * progress once. Runtime projection, sampling, and slicing therefore do not
- * rebuild trajectory geometry.
+ * Construction removes consecutive duplicate points and precomputes segment
+ * lengths/cumulative progress once. Runtime projection, sampling, and slicing
+ * therefore do not rebuild trajectory geometry.
  */
 class Trajectory
 {
 public:
     /**
      * Input: ordered map-frame waypoints describing one closed driving lap.
-     * Operation: stores a cleaned copy, removes an early prefix when the final
-     * waypoint lies on that prefix in the same travel direction, and adds the
-     * implicit last-to-first segment. This handles CSV files that start before
-     * the nominal lap origin and repeat that prefix at the end. Throws
-     * std::invalid_argument if fewer than two distinct points remain or the
-     * resulting lap length is zero.
+     * Operation: stores a cleaned copy and adds the implicit last-to-first
+     * segment. Throws std::invalid_argument if fewer than two distinct points
+     * remain or the resulting lap length is zero.
      */
     explicit Trajectory(
         const std::vector<geometry_msgs::msg::Point>& waypoints);
 
     /** Return the full closed-lap arc length in map units. */
     double total_length() const;
-
-    /** Number of source waypoints removed as an overlapping pre-roll prefix. */
-    std::size_t removed_prefix_point_count() const;
 
     /** Normalize arbitrary progress into [0, total_length). */
     double normalize_progress(double progress) const;
@@ -99,7 +92,6 @@ private:
     std::vector<double> segment_lengths_;
     std::vector<double> cumulative_lengths_;
     double total_length_ = 0.0;
-    std::size_t removed_prefix_point_count_ = 0;
 };
 
 }  // namespace optimal_trajectory

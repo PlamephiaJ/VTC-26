@@ -26,11 +26,6 @@ Mode Manager::mode() const
     return mode_;
 }
 
-std::size_t Manager::removed_prefix_point_count() const
-{
-    return trajectory_.removed_prefix_point_count();
-}
-
 void Manager::reset()
 {
     mode_ = Mode::optimal_reference;

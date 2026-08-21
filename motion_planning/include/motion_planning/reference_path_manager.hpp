@@ -81,9 +81,6 @@ public:
     /** Return the currently active reference source without updating state. */
     Mode mode() const;
 
-    /** Forward the trajectory loader's pre-roll cleanup count for diagnostics. */
-    std::size_t removed_prefix_point_count() const;
-
     /** Clear progress history and restore the default optimal-reference mode. */
     void reset();
 
