@@ -189,6 +189,8 @@ void RRT::clear_marker()
 RRT::~RRT()
 {
     delete goal_visualizer_;
+    delete lookahead_visualizer_;
+    delete global_waypoints_visualizer_;
     RCLCPP_INFO(this->get_logger(), "Exiting RRT Node.");
 }
 
@@ -242,6 +244,13 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
         throw std::invalid_argument("Bad configuration. STD must > 0.");
     }
 
+    this->declare_parameter("STEP_SIZE", STEP_SIZE_);
+    STEP_SIZE_ = this->get_parameter("STEP_SIZE").as_double();
+    if (STEP_SIZE_ <= 0)
+    {
+        throw std::invalid_argument("Bad configuration. STEP_SIZE must > 0.");
+    }
+
     this->declare_parameter("NEAR_RANGE", NEAR_RANGE_);
     NEAR_RANGE_ = this->get_parameter("NEAR_RANGE").as_double();
     if (NEAR_RANGE_ <= 0)
@@ -254,6 +263,13 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
     if (GOAL_TOLERANCE_ <= 0)
     {
         throw std::invalid_argument("Bad configuration. GOAL_TOLERANCE must > 0.");
+    }
+
+    this->declare_parameter("GOAL_SAMPLE_RATE", GOAL_SAMPLE_RATE_);
+    GOAL_SAMPLE_RATE_ = this->get_parameter("GOAL_SAMPLE_RATE").as_double();
+    if (GOAL_SAMPLE_RATE_ < 0 || GOAL_SAMPLE_RATE_ > 1)
+    {
+        throw std::invalid_argument("Bad configuration. GOAL_SAMPLE_RATE must be between 0 and 1.");
     }
 
     this->declare_parameter("RRT_WAYPOINT_INTERVAL", RRT_WAYPOINT_INTERVAL_);
@@ -297,12 +313,30 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
         throw std::invalid_argument("Bad configuration. scan_topic must not be empty.");
     }
 
+    this->declare_parameter("dynamic_map_topic", dynamic_map_topic_);
+    dynamic_map_topic_ = this->get_parameter("dynamic_map_topic").as_string();
+    if (dynamic_map_topic_.empty())
+    {
+        throw std::invalid_argument("Bad configuration. dynamic_map_topic must not be empty.");
+    }
+
     this->declare_parameter("drive_topic", drive_topic_);
     drive_topic_ = this->get_parameter("drive_topic").as_string();
     if (drive_topic_.empty())
     {
         throw std::invalid_argument("Bad configuration. drive_topic must not be empty.");
     }
+
+    this->declare_parameter("control_topic", control_topic_);
+    control_topic_ = this->get_parameter("control_topic").as_string();
+    if (control_topic_.empty())
+    {
+        throw std::invalid_argument("Bad configuration. control_topic must not be empty.");
+    }
+
+    this->declare_parameter("start_on_launch", start_on_launch_);
+    start_on_launch_ = this->get_parameter("start_on_launch").as_bool();
+    is_vehicle_enabled_ = start_on_launch_;
 
     this->declare_parameter("waypoint_file_path", waypoint_file_path_);
     waypoint_file_path_ = this->get_parameter("waypoint_file_path").as_string();
@@ -325,29 +359,41 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
     car_frame_ = this->get_namespace() + car_frame_;
     car_frame_ = car_frame_.substr(1);
 
-    scan_topic_ = this->get_namespace() + scan_topic_;
-    odom_topic_ = this->get_namespace() + odom_topic_;
-    dynamic_map_topic_ = this->get_namespace() + dynamic_map_topic_;
-    drive_topic_ = this->get_namespace() + drive_topic_;
-
-
-    subscriber_map_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(map_topic_, 10, std::bind(&RRT::map_callback, this, std::placeholders::_1));
+    auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
+    subscriber_map_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(map_topic_, map_qos, std::bind(&RRT::map_callback, this, std::placeholders::_1));
     subscriber_scan_ = this->create_subscription<sensor_msgs::msg::LaserScan>(scan_topic_, 1, std::bind(&RRT::scan_callback, this, std::placeholders::_1));
     subscriber_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(odom_topic_, 1, std::bind(&RRT::odom_callback, this, std::placeholders::_1));
+    subscriber_control_ = this->create_subscription<std_msgs::msg::String>(control_topic_, 10, std::bind(&RRT::control_callback, this, std::placeholders::_1));
     publisher_dynamic_map_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(dynamic_map_topic_, 1);
     publisher_path_ = this->create_publisher<visualization_msgs::msg::Marker>("path", 1);
     publisher_tree_node_ = this->create_publisher<visualization_msgs::msg::Marker>("tree_nodes", 1);
     publisher_tree_branches_ = this->create_publisher<visualization_msgs::msg::Marker>("tree_branches", 1);
     publisher_marker_ = this->create_publisher<visualization_msgs::msg::Marker>("rrt_marker", 10);
     publisher_goal_visualizer_ = this->create_publisher<visualization_msgs::msg::Marker>("goal", 10);
+    auto global_waypoints_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
+    publisher_global_waypoints_ = this->create_publisher<visualization_msgs::msg::Marker>("global_waypoints", global_waypoints_qos);
+    publisher_lookahead_ = this->create_publisher<visualization_msgs::msg::Marker>("lookahead", 10);
     publisher_drive_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>(drive_topic_, 1);
     init_marker();
 
     std_msgs::msg::ColorRGBA red; red.r =1.0; red.a=1.0;
     std_msgs::msg::ColorRGBA green; green.g =1.0; green.a=1.0;
     std_msgs::msg::ColorRGBA blue; blue.b =1.0; blue.a=1.0;
+    std_msgs::msg::ColorRGBA yellow; yellow.r =1.0; yellow.g=0.75; yellow.a=1.0;
 
     goal_visualizer_ = new MarkerVisualizer(publisher_goal_visualizer_, "goal", "map", green, 0.3, visualization_msgs::msg::Marker::SPHERE);
+    lookahead_visualizer_ = new MarkerVisualizer(publisher_lookahead_, "lookahead", "map", red, 0.2, visualization_msgs::msg::Marker::SPHERE);
+    global_waypoints_visualizer_ = new PointsVisualizer(publisher_global_waypoints_, "global_waypoints", "map", yellow, 0.08);
+    for (const auto& waypoint : global_waypoints_)
+    {
+        global_waypoints_visualizer_->add_point(waypoint);
+    }
+    global_waypoints_visualizer_->publish_points(false);
+    RCLCPP_INFO(this->get_logger(), "Published %zu global waypoints.", global_waypoints_.size());
+    global_waypoints_timer_ = this->create_wall_timer(std::chrono::seconds(5), [this]()
+    {
+        global_waypoints_visualizer_->publish_points(false);
+    });
 
     tree_nodes_.header.frame_id = tree_branch_.header.frame_id = "map";
     tree_nodes_.ns = "nodes"; tree_branch_.ns = "branch";
@@ -361,6 +407,34 @@ RRT::RRT(): rclcpp::Node("rrt_node"), gen_((std::random_device())())
     tree_nodes_.color = red; tree_branch_.color = blue;
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Node started successfully!");
+    if (is_vehicle_enabled_)
+    {
+        RCLCPP_WARN(this->get_logger(), "Vehicle motion is enabled on launch.");
+    }
+    else
+    {
+        stop_vehicle();
+        RCLCPP_INFO(this->get_logger(), "Vehicle stopped. Publish 'start' to %s to enable motion.", control_topic_.c_str());
+    }
+}
+
+void RRT::control_callback(const std_msgs::msg::String::ConstSharedPtr control_msg)
+{
+    if (control_msg->data == "start")
+    {
+        is_vehicle_enabled_ = true;
+        RCLCPP_INFO(this->get_logger(), "Vehicle motion enabled.");
+    }
+    else if (control_msg->data == "stop")
+    {
+        is_vehicle_enabled_ = false;
+        stop_vehicle();
+        RCLCPP_INFO(this->get_logger(), "Vehicle stopped. Planning and visualization remain active.");
+    }
+    else
+    {
+        RCLCPP_WARN(this->get_logger(), "Invalid control command '%s'. Expected 'start' or 'stop'.", control_msg->data.c_str());
+    }
 }
 
 void RRT::map_callback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr map_msg)
@@ -371,12 +445,18 @@ void RRT::map_callback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr map_ms
     previous_map_updating_time_ = this->get_clock()->now();
     // inflate map to set safety bubble.
     occupancy_grid::inflate_map(dynamic_map_, MARGIN_);
+    is_map_initialized_ = true;
+    is_goal_initialized_ = false;
     subscriber_map_.reset();
-    initialize_goal_waypoint();
 }
 
 void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr scan_msg)
 {
+    if (!is_map_initialized_)
+    {
+        return;
+    }
+
     if (!lookup_transform())
     {
         return;
@@ -414,9 +494,6 @@ void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr scan_m
         }
     }
 
-    // treat vehicle itself as an obstacle.
-    const std::vector<int> new_obstacles_indices = occupancy_grid::inflate_cell(dynamic_map_, occupancy_grid::xy_coord_to_array_index(dynamic_map_, current_pose_.position.x, current_pose_.position.y), 0.25, 0);
-    obstacle_indices_.insert(obstacle_indices_.end(), new_obstacles_indices.begin(), new_obstacles_indices.end());
     publisher_dynamic_map_->publish(dynamic_map_);
 }
 
@@ -424,7 +501,10 @@ void RRT::clear_map()
 {
     for (const auto& index : obstacle_indices_)
     {
-        dynamic_map_.data.at(index) = 0;
+        if (index >= 0 && index < int(dynamic_map_.data.size()) && index < int(map_.data.size()))
+        {
+            dynamic_map_.data.at(index) = map_.data.at(index);
+        }
     }
     obstacle_indices_.clear();
 }
@@ -513,31 +593,41 @@ double euclidean_distance_square(const double x1, const double y1, const double 
     return std::pow(x1 - x2, 2) + std::pow(y1 - y2, 2);
 }
 
-void RRT::initialize_goal_waypoint()
+bool RRT::initialize_goal_waypoint()
 {
-    nav_msgs::msg::Odometry odom_message;
-    bool status = rclcpp::wait_for_message(odom_message, this->shared_from_this(), odom_topic_, std::chrono::seconds(5));
-    if (status)
+    if (global_waypoints_.empty())
     {
-        int closest_waypoint_index = find_closest_ahead_waypoint(global_waypoints_, odom_message.pose.pose);
-        float closest_distance_square = euclidean_distance_square(global_waypoints_.at(closest_waypoint_index).x, global_waypoints_.at(closest_waypoint_index).y, odom_message.pose.pose.position.x, odom_message.pose.pose.position.y);
-        // the closet waypoint is too far.
-        if (closest_distance_square > std::pow(DISTANCE_GOAL_AHEAD_, 2))
-        {
-            throw std::runtime_error("Couldn't find a goal in range. Reposition the car somewhere near the waypoints");
-        }
+        RCLCPP_ERROR(this->get_logger(), "The waypoint list is empty.");
+        return false;
+    }
 
-        current_goal_index_ = closest_waypoint_index;
-        find_ahead_goal_waypoint();
-    }
-    else
+    int closest_waypoint_index = find_closest_ahead_waypoint(global_waypoints_, current_pose_);
+    if (closest_waypoint_index < 0)
     {
-        RCLCPP_INFO(this->get_logger(), "Failed to receive car's pose");
+        RCLCPP_ERROR(this->get_logger(), "Couldn't find a waypoint ahead of the vehicle.");
+        return false;
     }
+
+    float closest_distance_square = euclidean_distance_square(global_waypoints_.at(closest_waypoint_index).x, global_waypoints_.at(closest_waypoint_index).y, current_pose_.position.x, current_pose_.position.y);
+    // the closet waypoint is too far.
+    if (closest_distance_square > std::pow(DISTANCE_GOAL_AHEAD_, 2))
+    {
+        RCLCPP_ERROR(this->get_logger(), "Couldn't find a goal in range. Reposition the car somewhere near the waypoints");
+        return false;
+    }
+
+    current_goal_index_ = closest_waypoint_index;
+    is_goal_initialized_ = find_ahead_goal_waypoint();
+    return is_goal_initialized_;
 }
 
-void RRT::find_ahead_goal_waypoint()
+bool RRT::find_ahead_goal_waypoint()
 {
+    if (global_waypoints_.empty())
+    {
+        return false;
+    }
+
     int current_goal_index = current_goal_index_;
     if (current_goal_index >= (int)global_waypoints_.size())
     {
@@ -545,30 +635,48 @@ void RRT::find_ahead_goal_waypoint()
     }
     const float pose_x = current_pose_.position.x;
     const float pose_y = current_pose_.position.y;
-    float current_distance_square = euclidean_distance_square(global_waypoints_.at(current_goal_index).x, global_waypoints_.at(current_goal_index).y, pose_x, pose_y);
+    const float min_goal_distance_square = std::pow(DISTANCE_GOAL_AHEAD_ * 0.9, 2);
+    const float max_goal_distance_square = std::pow(DISTANCE_GOAL_AHEAD_, 2);
+    int selected_goal_index = -1;
 
     // filter the free waypoints between 0.9 * goal-ahead distance to 1.0 * goal-ahead distance.
-    while (current_distance_square < std::pow(DISTANCE_GOAL_AHEAD_ * 0.9, 2) || occupancy_grid::is_xy_coord_occupied(dynamic_map_, global_waypoints_.at(current_goal_index).x, global_waypoints_.at(current_goal_index).y))
+    for (int i = 0; i < int(global_waypoints_.size()); i++)
     {
-        current_distance_square = euclidean_distance_square(global_waypoints_.at(current_goal_index).x, global_waypoints_.at(current_goal_index).y, pose_x, pose_y);
-        current_goal_index++;
-        if (current_goal_index >= (int)global_waypoints_.size())
-        {
-            current_goal_index = 0;
-        }
-        if (current_distance_square > std::pow(DISTANCE_GOAL_AHEAD_, 2) && occupancy_grid::is_xy_coord_occupied(dynamic_map_, global_waypoints_.at(current_goal_index).x, global_waypoints_.at(current_goal_index).y))
+        const auto& waypoint = global_waypoints_.at(current_goal_index);
+        const float current_distance_square = euclidean_distance_square(waypoint.x, waypoint.y, pose_x, pose_y);
+
+        if (current_distance_square > max_goal_distance_square && i > 0)
         {
             break;
         }
+
+        if (current_distance_square <= max_goal_distance_square && !occupancy_grid::is_xy_coord_occupied(dynamic_map_, waypoint.x, waypoint.y))
+        {
+            selected_goal_index = current_goal_index;
+            if (current_distance_square >= min_goal_distance_square)
+            {
+                break;
+            }
+        }
+
+        current_goal_index = (current_goal_index + 1) % int(global_waypoints_.size());
     }
-    current_goal_index_ = std::max(0, current_goal_index - 1);
-    draw_point(global_waypoints_.at(current_goal_index_), 2, GREEN);
+
+    if (selected_goal_index < 0)
+    {
+        RCLCPP_WARN(this->get_logger(), "Couldn't find a free goal waypoint in range.");
+        return false;
+    }
+
+    current_goal_index_ = selected_goal_index;
+    visualize_goal();
+    return true;
 }
 
 int RRT::find_closest_ahead_waypoint(const std::vector<geometry_msgs::msg::Point>& waypoints, const geometry_msgs::msg::Pose& pose)
 {
     float min_distance_square = std::numeric_limits<float>::max();
-    int min_distance_index = 0;
+    int min_distance_index = -1;
     const int size_waypoint_list = waypoints.size();
     for (int i = 0; i < size_waypoint_list; i++)
     {
@@ -586,53 +694,80 @@ int RRT::find_closest_ahead_waypoint(const std::vector<geometry_msgs::msg::Point
     return min_distance_index;
 }
 
-void RRT::find_current_goal()
+bool RRT::find_current_goal()
 {
+    if (!is_goal_initialized_ && !initialize_goal_waypoint())
+    {
+        return false;
+    }
+
     const float distance_to_goal_square = euclidean_distance_square(global_waypoints_.at(current_goal_index_).x, global_waypoints_.at(current_goal_index_).y, current_pose_.position.x, current_pose_.position.y);
     // if goal is too far, reinitialize the goal.
     if (distance_to_goal_square > std::pow(DISTANCE_GOAL_AHEAD_, 2))
     {
-        initialize_goal_waypoint();
+        return initialize_goal_waypoint();
     }
     // if goal is occupied, move forward.
     if (occupancy_grid::is_xy_coord_occupied(dynamic_map_, global_waypoints_.at(current_goal_index_).x, global_waypoints_.at(current_goal_index_).y))
     {
-        find_ahead_goal_waypoint();
+        return find_ahead_goal_waypoint();
     }
     // if goal is too close, move forward.
     else if(distance_to_goal_square < std::pow(DISTANCE_GOAL_AHEAD_ * 0.75, 2))
     {
-        find_ahead_goal_waypoint();
+        return find_ahead_goal_waypoint();
     }
+    return true;
 }
 
 void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
 {
-    if (!lookup_transform())
+    current_pose_ = odom_msg->pose.pose;
+    if (!is_map_initialized_)
     {
         return;
     }
 
-    current_pose_ = odom_msg->pose.pose;
-    RRT_Node start_node;
+    if (!lookup_transform())
+    {
+        stop_vehicle();
+        return;
+    }
+
+    if (!find_current_goal())
+    {
+        stop_vehicle();
+        return;
+    }
+
+    RRT_Node start_node{};
     start_node.x = current_pose_.position.x;
     start_node.y = current_pose_.position.y;
     start_node.parent = 0;
     start_node.cost = 0.0;
     start_node.is_root = true;
 
-    find_current_goal();
-
     std::vector<RRT_Node> tree;
-    std::vector<RRT_Node> nodes_near_goal;
+    std::vector<int> nodes_near_goal;
+    bool is_path_found = false;
 
     tree.push_back(start_node);
 
     for (int iteration = 0; iteration < MAX_RRT_ITERATIONS_; iteration++)
     {
-        std::pair<float, float> sampled_point = sample();
+        std::pair<float, float> sampled_point;
+        if (!sample(sampled_point))
+        {
+            RCLCPP_WARN(this->get_logger(), "Couldn't sample a free point in the map.");
+            break;
+        }
         int nearest_node_index = nearest(tree, sampled_point);
         RRT_Node new_node = steer(tree.at(nearest_node_index), sampled_point);
+
+        if (line_cost(tree.at(nearest_node_index), new_node) <= std::numeric_limits<double>::epsilon())
+        {
+            continue;
+        }
 
         if (!check_collision(tree.at(nearest_node_index), new_node))
         {
@@ -674,53 +809,57 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
                     std::vector<int>::iterator start = tree.at(old_parent).children.begin();
                     std::vector<int>::iterator end = tree.at(old_parent).children.end();
                     tree.at(old_parent).children.erase(remove(start, end, near_nodes.at(i)), end);
+                    update_descendant_costs(tree, near_nodes.at(i));
                 }
             }
 
             if (is_goal(tree.back(), global_waypoints_.at(current_goal_index_).x, global_waypoints_.at(current_goal_index_).y))
             {
-                nodes_near_goal.emplace_back(tree.back());
+                nodes_near_goal.emplace_back(tree.size() - 1);
             }
         }
 
-        if(iteration > MIN_RRT_ITERATIONS_ && !nodes_near_goal.empty())
+        if(iteration + 1 >= MIN_RRT_ITERATIONS_ && !nodes_near_goal.empty())
         {
             // find out the lowerest cost node to goal waypoint.
-            RRT_Node best = *min_element(nodes_near_goal.begin(), nodes_near_goal.end(), [](RRT_Node& n1, RRT_Node& n2)
+            int best_node_index = *min_element(nodes_near_goal.begin(), nodes_near_goal.end(), [this, &tree](const int n1, const int n2)
             {
-                return n1.cost < n2.cost;
+                const auto& goal = global_waypoints_.at(current_goal_index_);
+                const double cost1 = tree.at(n1).cost + std::sqrt(euclidean_distance_square(tree.at(n1).x, tree.at(n1).y, goal.x, goal.y));
+                const double cost2 = tree.at(n2).cost + std::sqrt(euclidean_distance_square(tree.at(n2).x, tree.at(n2).y, goal.x, goal.y));
+                return cost1 < cost2;
             });
 
-            std::vector<RRT_Node> path_found = find_path(tree, nodes_near_goal.back());
+            std::vector<RRT_Node> found_path = find_path(tree, tree.at(best_node_index));
 
             // visualize the path.
-            visualization_msgs::msg::Marker path_dots;
-            path_dots.header.frame_id = "map";
-            path_dots.id = 20;
-            path_dots.ns = "path";
-            path_dots.type = visualization_msgs::msg::Marker::POINTS;
-            path_dots.scale.x = path_dots.scale.y = path_dots.scale.z = 0.08;
-            path_dots.action = visualization_msgs::msg::Marker::ADD;
-            path_dots.pose.orientation.w = 1.0;
-            path_dots.color.g = 1.0;
-            path_dots.color.r = 0.0;
-            path_dots.color.a = 1.0;
+            visualization_msgs::msg::Marker path_marker;
+            path_marker.header.frame_id = "map";
+            path_marker.id = 20;
+            path_marker.ns = "path";
+            path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            path_marker.scale.x = 0.05;
+            path_marker.action = visualization_msgs::msg::Marker::ADD;
+            path_marker.pose.orientation.w = 1.0;
+            path_marker.color.g = 1.0;
+            path_marker.color.r = 0.0;
+            path_marker.color.a = 1.0;
 
-            for (int i=0; i < (int)path_found.size(); i++)
+            for (int i=0; i < (int)found_path.size(); i++)
             {
                 geometry_msgs::msg::Point p;
-                p.x = path_found.at(i).x;
-                p.y = path_found.at(i).y;
-                path_dots.points.emplace_back(p);
+                p.x = found_path.at(i).x;
+                p.y = found_path.at(i).y;
+                path_marker.points.emplace_back(p);
             }
 
             std::vector<geometry_msgs::msg::Point> path_interpolated;
 
             // smooth the path.
-            for (int i = 0; i < (int)path_dots.points.size() - 1; i++)
+            for (int i = 0; i < (int)path_marker.points.size() - 1; i++)
             {
-                path_interpolated.emplace_back(path_dots.points[i]);
-                float distance = std::sqrt(std::pow(path_dots.points[i + 1].x - path_dots.points[i].x, 2) + std::pow(path_dots.points[i + 1].y - path_dots.points[i].y, 2));
+                path_interpolated.emplace_back(path_marker.points[i]);
+                float distance = std::sqrt(std::pow(path_marker.points[i + 1].x - path_marker.points[i].x, 2) + std::pow(path_marker.points[i + 1].y - path_marker.points[i].y, 2));
                 if (distance < RRT_WAYPOINT_INTERVAL_)
                 {
                     continue;
@@ -730,11 +869,12 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
                 for(int j = 1; j < num; j++)
                 {
                     geometry_msgs::msg::Point p;
-                    p.x = path_dots.points[i].x + j * ((path_dots.points[i + 1].x - path_dots.points[i].x) / num);
-                    p.y = path_dots.points[i].y + j * ((path_dots.points[i + 1].y - path_dots.points[i].y) / num);
+                    p.x = path_marker.points[i].x + j * ((path_marker.points[i + 1].x - path_marker.points[i].x) / num);
+                    p.y = path_marker.points[i].y + j * ((path_marker.points[i + 1].y - path_marker.points[i].y) / num);
                     path_interpolated.emplace_back(p);
                 }
             }
+            path_interpolated.emplace_back(path_marker.points.back());
 
             nav_msgs::msg::Path path;
             path.header.frame_id = "map";
@@ -746,40 +886,51 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
                 path.poses.emplace_back(pose_stamped);
             }
 
-            path_dots.points = path_interpolated;
-            publisher_path_->publish(path_dots);
+            path_marker.points = path_interpolated;
+            publisher_path_->publish(path_marker);
             follow_the_path(path);
             visualize_tree(tree);
+            is_path_found = true;
             break;
         }
     }
 
-    if (nodes_near_goal.empty())
+    if (!is_path_found)
     {
-        // RCLCPP_INFO(this->get_logger(), "Couldn't find a path");
+        const bool start_occupied = occupancy_grid::is_xy_coord_occupied(dynamic_map_, start_node.x, start_node.y);
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "Couldn't find a path. Stopping the vehicle. Tree nodes: %zu, goal candidates: %zu, start occupied: %s.",
+            tree.size(), nodes_near_goal.size(), start_occupied ? "true" : "false");
+        stop_vehicle();
     }
 }
 
-std::pair<float, float> RRT::sample()
+bool RRT::sample(std::pair<float, float>& sampled_point)
 {
-    std::pair<float, float> sampled_point;
+    const auto& goal = global_waypoints_.at(current_goal_index_);
+    if (uni_dist_(gen_) < GOAL_SAMPLE_RATE_ && !occupancy_grid::is_xy_coord_occupied(dynamic_map_, goal.x, goal.y))
+    {
+        sampled_point.first = goal.x;
+        sampled_point.second = goal.y;
+        return true;
+    }
 
     std::normal_distribution<double> norm_dist_x(0.6 * global_waypoints_.at(current_goal_index_).x + 0.4 * current_pose_.position.x, STD_);
     std::normal_distribution<double> norm_dist_y(0.6 * global_waypoints_.at(current_goal_index_).y + 0.4 * current_pose_.position.y, STD_);
 
-    const double x = norm_dist_x(gen_);
-    const double y = norm_dist_y(gen_);
-
-    if (!occupancy_grid::is_xy_coord_occupied(dynamic_map_,x, y))
+    constexpr int MAX_SAMPLE_ATTEMPTS = 1000;
+    for (int i = 0; i < MAX_SAMPLE_ATTEMPTS; i++)
     {
-        sampled_point.first = x;
-        sampled_point.second = y;
-        return sampled_point;
+        const double x = norm_dist_x(gen_);
+        const double y = norm_dist_y(gen_);
+        if (!occupancy_grid::is_xy_coord_occupied(dynamic_map_, x, y))
+        {
+            sampled_point.first = x;
+            sampled_point.second = y;
+            return true;
+        }
     }
-    else
-    {
-        return sample();
-    }
+    return false;
 }
 
 int RRT::nearest(std::vector<RRT_Node>& tree, std::pair<float, float>& sampled_point)
@@ -801,8 +952,15 @@ int RRT::nearest(std::vector<RRT_Node>& tree, std::pair<float, float>& sampled_p
 
 RRT_Node RRT::steer(RRT_Node& nearest_node, std::pair<float, float>& sampled_point)
 {
-    RRT_Node new_node;
+    RRT_Node new_node{};
     float distance = std::sqrt(euclidean_distance_square(nearest_node.x, nearest_node.y, sampled_point.first, sampled_point.second));
+
+    if (distance <= std::numeric_limits<float>::epsilon())
+    {
+        new_node.x = nearest_node.x;
+        new_node.y = nearest_node.y;
+        return new_node;
+    }
 
     new_node.x = nearest_node.x + std::min(STEP_SIZE_, distance) * (sampled_point.first - nearest_node.x) / distance;
     new_node.y = nearest_node.y + std::min(STEP_SIZE_, distance) * (sampled_point.second - nearest_node.y) / distance;
@@ -812,18 +970,35 @@ RRT_Node RRT::steer(RRT_Node& nearest_node, std::pair<float, float>& sampled_poi
 
 bool RRT::check_collision(RRT_Node& nearest_node, RRT_Node& new_node)
 {
-    int x_cell_diff = std::abs(std::ceil((nearest_node.x - new_node.x) / dynamic_map_.info.resolution));
-    int y_cell_diff = std::abs(std::ceil((nearest_node.y - new_node.y) / dynamic_map_.info.resolution));
+    if (dynamic_map_.info.resolution <= 0.0)
+    {
+        return true;
+    }
 
-    float dt = 1.0 / std::max(x_cell_diff, y_cell_diff);
+    int x_cell_diff = std::ceil(std::abs(nearest_node.x - new_node.x) / dynamic_map_.info.resolution);
+    int y_cell_diff = std::ceil(std::abs(nearest_node.y - new_node.y) / dynamic_map_.info.resolution);
+    const int num_steps = std::max(x_cell_diff, y_cell_diff);
+    const float dt = num_steps > 0 ? 1.0 / num_steps : 0.0;
+    const bool root_in_inflated_space = nearest_node.is_root &&
+        occupancy_grid::is_xy_coord_occupied(dynamic_map_, nearest_node.x, nearest_node.y) &&
+        !occupancy_grid::is_xy_coord_occupied(map_, nearest_node.x, nearest_node.y);
+    const float escape_distance = std::max(MARGIN_, DETECTED_OBS_MARGIN_) + dynamic_map_.info.resolution;
+    const float escape_distance_square = std::pow(escape_distance, 2);
     float t = 0.0;
 
-    for (int i = 0; i <= std::max(x_cell_diff, y_cell_diff); i++)
+    for (int i = 0; i <= num_steps; i++)
     {
         float x = nearest_node.x + t * (new_node.x - nearest_node.x);
         float y = nearest_node.y + t * (new_node.y - nearest_node.y);
         if (occupancy_grid::is_xy_coord_occupied(dynamic_map_, x, y))
         {
+            const float distance_from_root_square = euclidean_distance_square(nearest_node.x, nearest_node.y, x, y);
+            if (root_in_inflated_space && distance_from_root_square <= escape_distance_square &&
+                !occupancy_grid::is_xy_coord_occupied(map_, x, y))
+            {
+                t += dt;
+                continue;
+            }
             return true;
         }
         t += dt;
@@ -869,7 +1044,16 @@ std::vector<RRT_Node> RRT::find_path(std::vector<RRT_Node>& tree, RRT_Node& node
     return found_path;
 }
 
-void RRT::visualize_tree(std::vector<RRT_Node>& tree)
+void RRT::update_descendant_costs(std::vector<RRT_Node>& tree, const int node_index)
+{
+    for (const auto child_index : tree.at(node_index).children)
+    {
+        tree.at(child_index).cost = tree.at(node_index).cost + line_cost(tree.at(node_index), tree.at(child_index));
+        update_descendant_costs(tree, child_index);
+    }
+}
+
+void RRT::visualize_goal()
 {
     geometry_msgs::msg::Pose goal_pose;
     goal_pose.orientation.w = 1.0;
@@ -877,6 +1061,11 @@ void RRT::visualize_tree(std::vector<RRT_Node>& tree)
     goal_pose.position.y = global_waypoints_.at(current_goal_index_).y;
     goal_visualizer_->set_pose(goal_pose);
     goal_visualizer_->publish_marker();
+}
+
+void RRT::visualize_tree(std::vector<RRT_Node>& tree)
+{
+    visualize_goal();
 
     tree_nodes_.points.clear();
     tree_branch_.points.clear();
@@ -933,9 +1122,20 @@ void RRT::follow_the_path(const nav_msgs::msg::Path& path)
     msg.drive.speed = speed;
     msg.drive.steering_angle = steering_angle;
     msg.drive.steering_angle_velocity = 1.0;
-    publisher_drive_->publish(msg);
+    if (is_vehicle_enabled_)
+    {
+        publisher_drive_->publish(msg);
+    }
+    else
+    {
+        stop_vehicle();
+    }
 
-    draw_point(waypoint_mapframe, 0.1, GREEN);
+    geometry_msgs::msg::Pose lookahead_pose;
+    lookahead_pose.orientation.w = 1.0;
+    lookahead_pose.position = waypoint_mapframe;
+    lookahead_visualizer_->set_pose(lookahead_pose);
+    lookahead_visualizer_->publish_marker();
 }
 
 float rad_to_deg(const float rads)
@@ -946,6 +1146,15 @@ float rad_to_deg(const float rads)
 float deg_to_rad(const float degs)
 {
     return degs * M_PI / 180.0;
+}
+
+void RRT::stop_vehicle()
+{
+    ackermann_msgs::msg::AckermannDriveStamped msg;
+    msg.header.stamp = this->now();
+    msg.drive.speed = 0.0;
+    msg.drive.steering_angle = 0.0;
+    publisher_drive_->publish(msg);
 }
 
 float RRT::get_speed(const float steering_angle)

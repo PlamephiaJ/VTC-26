@@ -1,0 +1,1 @@
+ros2 topic pub --once /ego_racecar/control std_msgs/msg/String "{data: stop}"

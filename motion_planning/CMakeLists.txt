@@ -48,8 +48,21 @@ install(TARGETS
   rrt_node_sim
   DESTINATION lib/${PROJECT_NAME})
 
+install(DIRECTORY
+  config
+  launch
+  DESTINATION share/${PROJECT_NAME})
+
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
+
+  ament_add_gtest(test_occupancy_grid
+    test/test_occupancy_grid.cpp
+    src/occupancy_grid.cpp)
+  target_include_directories(test_occupancy_grid PRIVATE include)
+  ament_target_dependencies(test_occupancy_grid nav_msgs)
+
   # the following line skips the linter which checks for copyrights
   # uncomment the line when a copyright and license is not present in all source files
   #set(ament_cmake_copyright_FOUND TRUE)

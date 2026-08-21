@@ -10,8 +10,6 @@
 #define RRT_HPP
 
 #include "rclcpp/rclcpp.hpp"
-#include "rclcpp/wait_for_message.hpp"
-
 #include "tf2_ros/transform_listener.hpp"
 #include "tf2_ros/buffer.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -20,11 +18,13 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 
 #include "../include/motion_planning/Visualization.hpp"
 
+#include <chrono>
 #include <random>
 
 constexpr int RED = 1;
@@ -53,9 +53,9 @@ private:
     float SCAN_RANGE_ = 4.0;
     // obstacles inflation margin.
     float DETECTED_OBS_MARGIN_ = 0.22;
-    // minimum RRT iterations.
-    int MAX_RRT_ITERATIONS_ = 1200;
     // maximum RRT iterations.
+    int MAX_RRT_ITERATIONS_ = 1200;
+    // minimum RRT iterations.
     int MIN_RRT_ITERATIONS_ = 1000;
     // RRT sample distribution standard deviation.
     float STD_ = 1.5;
@@ -65,6 +65,8 @@ private:
     float NEAR_RANGE_ = 1.0;
     // goal radius limitation.
     float GOAL_TOLERANCE_ = 0.1;
+    // probability of sampling the current goal directly.
+    float GOAL_SAMPLE_RATE_ = 0.1;
     // RRT waypoints interval.
     float RRT_WAYPOINT_INTERVAL_ = 0.2;
     // pure pursuit look-ahead distance
@@ -73,11 +75,13 @@ private:
     float PID_P_ = 0.25;
 
     // topic name
-    std::string odom_topic_ = "/odom";
+    std::string odom_topic_ = "/ego_racecar/odom";
     std::string map_topic_ = "/map";
     std::string scan_topic_ = "/scan";
-    std::string dynamic_map_topic_ = "/dynamic_map";
+    std::string dynamic_map_topic_ = "/ego_racecar/dynamic_map";
     std::string drive_topic_ = "/drive";
+    std::string control_topic_ = "/ego_racecar/control";
+    bool start_on_launch_ = false;
 
     std::string waypoint_file_path_;
 
@@ -89,6 +93,15 @@ private:
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr subscriber_map_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscriber_scan_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscriber_odom_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscriber_control_;
+    bool is_vehicle_enabled_ = false;
+
+    /**
+     * @description: enable or stop vehicle motion without stopping planning.
+     * @param {std_msgs::msg::String::ConstSharedPtr} control_msg
+     * @return {*}
+     */
+    void control_callback(const std_msgs::msg::String::ConstSharedPtr control_msg);
 
     /**
      * @description: map callback to receive initial map.
@@ -118,6 +131,8 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_tree_node_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_tree_branches_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_goal_visualizer_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_global_waypoints_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_lookahead_;
 
     // map and dynamic map.
     // timestamp recorded to clear dynamic obstacles.
@@ -129,6 +144,8 @@ private:
     nav_msgs::msg::OccupancyGrid dynamic_map_;
     // dynamic obstacle indices on dynamic map.
     std::vector<int> obstacle_indices_;
+    bool is_map_initialized_ = false;
+    bool is_goal_initialized_ = false;
 
     /**
      * @description: clear dynamic obstacles.
@@ -141,27 +158,27 @@ private:
 
     // RRT motion planning.
     // current goal index in the waypoints vector.
-    int current_goal_index_;
+    int current_goal_index_ = 0;
     // current pose of the car.
     geometry_msgs::msg::Pose current_pose_;
 
     /**
      * @description: find current goal based on map and vehicle state. This is to optimize the waypoint searching efficiency.
-     * @return {*}
+     * @return {bool} whether a valid goal is available.
      */
-    void find_current_goal();
+    bool find_current_goal();
 
     /**
      * @description: find a proper initial goal.
-     * @return {*}
+     * @return {bool} whether a valid goal is found.
      */
-    void initialize_goal_waypoint();
+    bool initialize_goal_waypoint();
 
     /**
      * @description: find a proper forward waypoint.
-     * @return {*}
+     * @return {bool} whether a valid goal is found.
      */
-    void find_ahead_goal_waypoint();
+    bool find_ahead_goal_waypoint();
 
     /**
      * @description: given current pose and waypoint vector, find the closet waypoint.
@@ -173,9 +190,10 @@ private:
 
     /**
      * @description: sample a new point based on some constraints.
-     * @return {std::pair<float, float>} new sample point coordinate (x, y) in map frame.
+     * @param {std::pair<float, float>&} sampled_point : new sample point coordinate (x, y) in map frame.
+     * @return {bool} whether a free point is sampled.
      */
-    std::pair<float, float> sample();
+    bool sample(std::pair<float, float>& sampled_point);
 
     /**
      * @description: find nearest node to the sample point in the RRT tree.
@@ -233,6 +251,14 @@ private:
      * @return {std::vector<RRT_Node>} a vector contains all nodes on the path.
      */
     std::vector<RRT_Node> find_path(std::vector<RRT_Node>& tree, RRT_Node& node);
+
+    /**
+     * @description: update the costs of all descendants after rewiring.
+     * @param {std::vector<RRT_Node>&} tree
+     * @param {int} node_index
+     * @return {*}
+     */
+    void update_descendant_costs(std::vector<RRT_Node>& tree, const int node_index);
     
     /**
      * @description: pure pursuit to follow the path.
@@ -247,6 +273,12 @@ private:
      * @return {float} speed
      */
     float get_speed(const float steering_angle);
+
+    /**
+     * @description: publish a stop command when no safe path is available.
+     * @return {*}
+     */
+    void stop_vehicle();
 
     // tf2 transformation.
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
@@ -273,9 +305,13 @@ private:
 
     // visualization.
     MarkerVisualizer* goal_visualizer_;
+    MarkerVisualizer* lookahead_visualizer_;
+    PointsVisualizer* global_waypoints_visualizer_;
+    rclcpp::TimerBase::SharedPtr global_waypoints_timer_;
     visualization_msgs::msg::Marker tree_nodes_;
     visualization_msgs::msg::Marker tree_branch_;
 
+    void visualize_goal();
     void visualize_tree(std::vector<RRT_Node>& tree);
 
     // debug visualization

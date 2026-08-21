@@ -28,10 +28,13 @@ void PointsVisualizer::add_point(geometry_msgs::msg::Point p)
     dots.points.emplace_back(p);
 }
 
-void PointsVisualizer::publish_points()
+void PointsVisualizer::publish_points(bool clear_after_publish)
 {
     pub->publish(dots);
-    dots.points.clear();
+    if (clear_after_publish)
+    {
+        dots.points.clear();
+    }
 }
 
 MarkerVisualizer::MarkerVisualizer(rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub, std::string ns, std::string frame_id, std_msgs::msg::ColorRGBA color, float scale, int shape): pub(pub), ns(ns), frame_id(frame_id)

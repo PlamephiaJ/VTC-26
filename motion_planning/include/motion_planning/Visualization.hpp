@@ -24,7 +24,7 @@ protected:
 public:
     PointsVisualizer(rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub, std::string ns, std::string frame_id, std_msgs::msg::ColorRGBA color, float scale);
     void add_point(geometry_msgs::msg::Point p);
-    void publish_points();
+    void publish_points(bool clear_after_publish = true);
 };
 
 class MarkerVisualizer {
