@@ -10,8 +10,10 @@
 #include "tf2/time.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <stdexcept>
+#include <utility>
 
 RRT::RRT()
     : rclcpp::Node("rrt_node")
@@ -31,8 +33,9 @@ RRT::RRT()
         stop_vehicle();
         RCLCPP_INFO(
             this->get_logger(),
-            "Vehicle stopped. Publish 'start' to %s to enable motion.",
-            control_topic_.c_str());
+            "Vehicle stopped. Publish 'start' to %s (single vehicle) or %s "
+            "(all vehicles) to enable motion.",
+            control_topic_.c_str(), fleet_control_topic_.c_str());
     }
 }
 
@@ -73,6 +76,23 @@ void RRT::load_parameters()
     {
         throw std::invalid_argument(
             "Bad configuration. DETECTED_OBS_MARGIN must be >= 0.");
+    }
+
+    this->declare_parameter(
+        "DYNAMIC_OBSTACLE_PERSISTENCE", dynamic_obstacle_persistence_);
+    dynamic_obstacle_persistence_ = this->get_parameter(
+        "DYNAMIC_OBSTACLE_PERSISTENCE").as_double();
+    this->declare_parameter(
+        "DYNAMIC_MAP_UPDATE_PERIOD", dynamic_map_update_period_);
+    dynamic_map_update_period_ = this->get_parameter(
+        "DYNAMIC_MAP_UPDATE_PERIOD").as_double();
+    if (dynamic_obstacle_persistence_ <= 0.0 ||
+        dynamic_map_update_period_ <= 0.0 ||
+        dynamic_map_update_period_ > dynamic_obstacle_persistence_)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. Dynamic-obstacle timing must satisfy "
+            "0 < update period <= persistence.");
     }
 
     this->declare_parameter("MIN_RRT_ITERATIONS", minimum_rrt_iterations_);
@@ -151,6 +171,16 @@ void RRT::load_parameters()
     }
 
     this->declare_parameter(
+        "OPTIMAL_REJOIN_CLEAR_TIME", optimal_rejoin_clear_time_);
+    optimal_rejoin_clear_time_ =
+        this->get_parameter("OPTIMAL_REJOIN_CLEAR_TIME").as_double();
+    if (optimal_rejoin_clear_time_ < 0.0)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. OPTIMAL_REJOIN_CLEAR_TIME must be >= 0.");
+    }
+
+    this->declare_parameter(
         "PROGRESS_SEARCH_BACKWARD", progress_search_backward_);
     progress_search_backward_ =
         this->get_parameter("PROGRESS_SEARCH_BACKWARD").as_double();
@@ -224,6 +254,46 @@ void RRT::load_parameters()
             "straight >= medium turn >= sharp turn > 0.");
     }
 
+    this->declare_parameter(
+        "BLOCKED_PATH_STOP_DISTANCE", blocked_path_stop_distance_);
+    blocked_path_stop_distance_ = this->get_parameter(
+        "BLOCKED_PATH_STOP_DISTANCE").as_double();
+    this->declare_parameter(
+        "BLOCKED_PATH_SPEED_GAIN", blocked_path_speed_gain_);
+    blocked_path_speed_gain_ = this->get_parameter(
+        "BLOCKED_PATH_SPEED_GAIN").as_double();
+    if (blocked_path_stop_distance_ < 0.0 || blocked_path_speed_gain_ <= 0.0)
+    {
+        throw std::invalid_argument(
+            "Bad configuration. BLOCKED_PATH_STOP_DISTANCE must be >= 0 "
+            "and BLOCKED_PATH_SPEED_GAIN must be > 0.");
+    }
+
+    this->declare_parameter(
+        "VISUALIZATION_PRIMARY_COLOR", visualization_primary_color_);
+    visualization_primary_color_ = this->get_parameter(
+        "VISUALIZATION_PRIMARY_COLOR").as_double_array();
+    this->declare_parameter(
+        "VISUALIZATION_ACCENT_COLOR", visualization_accent_color_);
+    visualization_accent_color_ = this->get_parameter(
+        "VISUALIZATION_ACCENT_COLOR").as_double_array();
+    const auto valid_color = [](const std::vector<double>& color)
+        {
+            return color.size() == 3 && std::all_of(
+                color.begin(), color.end(),
+                [](const double channel)
+                {
+                    return channel >= 0.0 && channel <= 1.0;
+                });
+        };
+    if (!valid_color(visualization_primary_color_) ||
+        !valid_color(visualization_accent_color_))
+    {
+        throw std::invalid_argument(
+            "Bad configuration. Visualization colors must be RGB arrays "
+            "with three values in [0, 1].");
+    }
+
     this->declare_parameter("odom_topic", odom_topic_);
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     this->declare_parameter("map_topic", map_topic_);
@@ -236,9 +306,12 @@ void RRT::load_parameters()
     drive_topic_ = this->get_parameter("drive_topic").as_string();
     this->declare_parameter("control_topic", control_topic_);
     control_topic_ = this->get_parameter("control_topic").as_string();
+    this->declare_parameter("fleet_control_topic", fleet_control_topic_);
+    fleet_control_topic_ =
+        this->get_parameter("fleet_control_topic").as_string();
     if (odom_topic_.empty() || map_topic_.empty() || scan_topic_.empty() ||
         dynamic_map_topic_.empty() || drive_topic_.empty() ||
-        control_topic_.empty())
+        control_topic_.empty() || fleet_control_topic_.empty())
     {
         throw std::invalid_argument(
             "Bad configuration. ROS topic names must not be empty.");
@@ -283,6 +356,7 @@ void RRT::initialize_algorithm_modules()
     reference_path::ManagerConfig reference_config;
     reference_config.global_goal_distance = goal_ahead_distance_;
     reference_config.rejoin_distance = optimal_rejoin_distance_;
+    reference_config.rejoin_clearance_time = optimal_rejoin_clear_time_;
     reference_config.progress_search_backward = progress_search_backward_;
     reference_config.progress_search_forward = progress_search_forward_;
     reference_config.projection_fallback_distance =
@@ -313,6 +387,14 @@ void RRT::initialize_ros_interfaces()
     control_subscriber_ = this->create_subscription<std_msgs::msg::String>(
         control_topic_, 10,
         std::bind(&RRT::control_callback, this, std::placeholders::_1));
+    if (fleet_control_topic_ != control_topic_)
+    {
+        fleet_control_subscriber_ =
+            this->create_subscription<std_msgs::msg::String>(
+                fleet_control_topic_, 10,
+                std::bind(
+                    &RRT::control_callback, this, std::placeholders::_1));
+    }
 
     dynamic_map_publisher_ =
         this->create_publisher<nav_msgs::msg::OccupancyGrid>(dynamic_map_topic_, 1);
@@ -339,28 +421,28 @@ void RRT::initialize_ros_interfaces()
 
 void RRT::initialize_visualization()
 {
-    std_msgs::msg::ColorRGBA red;
-    red.r = 1.0;
-    red.a = 1.0;
-    std_msgs::msg::ColorRGBA green;
-    green.g = 1.0;
-    green.a = 1.0;
-    std_msgs::msg::ColorRGBA blue;
-    blue.b = 1.0;
-    blue.a = 1.0;
-    std_msgs::msg::ColorRGBA yellow;
-    yellow.r = 1.0;
-    yellow.g = 0.75;
-    yellow.a = 1.0;
+    const auto make_color = [](const std::vector<double>& rgb)
+        {
+            std_msgs::msg::ColorRGBA color;
+            color.r = static_cast<float>(rgb.at(0));
+            color.g = static_cast<float>(rgb.at(1));
+            color.b = static_cast<float>(rgb.at(2));
+            color.a = 1.0;
+            return color;
+        };
+    const std_msgs::msg::ColorRGBA primary =
+        make_color(visualization_primary_color_);
+    const std_msgs::msg::ColorRGBA accent =
+        make_color(visualization_accent_color_);
 
     goal_visualizer_ = std::make_unique<MarkerVisualizer>(
-        goal_publisher_, "goal", map_frame_, green, 0.3,
+        goal_publisher_, "goal", map_frame_, primary, 0.3,
         visualization_msgs::msg::Marker::SPHERE);
     lookahead_visualizer_ = std::make_unique<MarkerVisualizer>(
-        lookahead_publisher_, "lookahead", map_frame_, red, 0.2,
+        lookahead_publisher_, "lookahead", map_frame_, accent, 0.2,
         visualization_msgs::msg::Marker::SPHERE);
     global_waypoints_visualizer_ = std::make_unique<PointsVisualizer>(
-        waypoint_publisher_, "global_waypoints", map_frame_, yellow, 0.08);
+        waypoint_publisher_, "global_waypoints", map_frame_, primary, 0.08);
     for (const auto& waypoint : global_waypoints_)
     {
         global_waypoints_visualizer_->add_point(waypoint);
@@ -386,8 +468,8 @@ void RRT::initialize_visualization()
     tree_nodes_.scale.y = 0.05;
     tree_nodes_.scale.z = 0.05;
     tree_branches_.scale.x = 0.01;
-    tree_nodes_.color = red;
-    tree_branches_.color = blue;
+    tree_nodes_.color = accent;
+    tree_branches_.color = primary;
 }
 
 void RRT::control_callback(const std_msgs::msg::String::ConstSharedPtr message)
@@ -418,7 +500,8 @@ void RRT::map_callback(
 {
     obstacle_map_.initialize(*message, map_inflation_margin_);
     reference_manager_->reset();
-    previous_obstacle_clear_time_ = this->get_clock()->now();
+    obstacle_frames_.clear();
+    last_dynamic_map_update_seconds_ = -1.0;
     map_subscriber_.reset();
     RCLCPP_INFO(this->get_logger(), "Initial map received and inflated.");
 }
@@ -479,23 +562,55 @@ geometry_msgs::msg::Point RRT::map_point_to_vehicle(
 
 void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr message)
 {
-    if (!obstacle_map_.initialized() || !lookup_laser_transform())
+    if (!obstacle_map_.initialized())
     {
         return;
     }
 
-    const rclcpp::Time now = this->get_clock()->now();
-    if ((now - previous_obstacle_clear_time_).seconds() > 0.5)
+    const double now_seconds = this->get_clock()->now().seconds();
+    if (last_dynamic_map_update_seconds_ >= 0.0 &&
+        now_seconds < last_dynamic_map_update_seconds_)
     {
-        obstacle_map_.clear_observations();
-        previous_obstacle_clear_time_ = now;
+        obstacle_frames_.clear();
+        last_dynamic_map_update_seconds_ = -1.0;
+    }
+    if (last_dynamic_map_update_seconds_ >= 0.0 &&
+        now_seconds - last_dynamic_map_update_seconds_ <
+        dynamic_map_update_period_)
+    {
+        return;
+    }
+    if (!lookup_laser_transform())
+    {
+        return;
     }
 
+    TimedObstacleFrame current_frame;
+    current_frame.stamp_seconds = now_seconds;
     for (const auto& laser_point :
          dynamic_obstacles::valid_hit_points(*message, scan_range_))
     {
-        obstacle_map_.add_observation(
-            laser_point_to_map(laser_point), detected_obstacle_margin_);
+        current_frame.points.emplace_back(laser_point_to_map(laser_point));
+    }
+    obstacle_frames_.emplace_back(std::move(current_frame));
+    last_dynamic_map_update_seconds_ = now_seconds;
+
+    const double oldest_allowed =
+        now_seconds - dynamic_obstacle_persistence_;
+    while (!obstacle_frames_.empty() &&
+           obstacle_frames_.front().stamp_seconds < oldest_allowed)
+    {
+        obstacle_frames_.pop_front();
+    }
+
+    obstacle_map_.clear_observations();
+    for (const auto& frame : obstacle_frames_)
+    {
+        for (const auto& map_point : frame.points)
+        {
+            obstacle_map_.add_observation(
+                map_point, detected_obstacle_margin_);
+        }
     }
     dynamic_map_publisher_->publish(obstacle_map_.collision_map());
 }
@@ -537,7 +652,8 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
     }
 
     const reference_path::Decision reference = reference_manager_->update(
-        current_pose_.position, obstacle_map_.collision_map());
+        current_pose_.position, obstacle_map_.collision_map(),
+        this->get_clock()->now().seconds());
     log_reference_transition(reference);
     visualize_goal(reference.global_goal);
 
@@ -572,7 +688,11 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
             start_occupied ? "true" : "false",
             plan.failure == rrt_star::PlanFailure::sampling_failed ?
                 "true" : "false");
-        stop_vehicle();
+        visualize_tree(plan.tree);
+        if (!follow_blocked_reference(reference.local_optimal_reference))
+        {
+            stop_vehicle();
+        }
         return;
     }
 
@@ -586,7 +706,37 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
     visualize_tree(plan.tree);
 }
 
-void RRT::follow_path(const nav_msgs::msg::Path& path)
+bool RRT::follow_blocked_reference(
+    const std::vector<geometry_msgs::msg::Point>& optimal_reference)
+{
+    const auto collision_distance =
+        occupancy_grid::distance_to_first_collision(
+            obstacle_map_.collision_map(), optimal_reference);
+    if (!collision_distance)
+    {
+        return false;
+    }
+
+    const double speed_limit = path_tracking::blocked_path_speed_limit(
+        *collision_distance, blocked_path_stop_distance_,
+        blocked_path_speed_gain_);
+    const auto path_points = path_tracking::resample_polyline(
+        optimal_reference, rrt_waypoint_interval_);
+    const nav_msgs::msg::Path path =
+        path_tracking::to_path_message(path_points, map_frame_);
+    publish_path_marker(path_points);
+    follow_path(path, speed_limit);
+    RCLCPP_INFO_THROTTLE(
+        this->get_logger(), *this->get_clock(), 1000,
+        "No detour available; LiDAR-only blocked-path control: "
+        "collision distance %.2f m, speed limit %.2f m/s.",
+        *collision_distance, speed_limit);
+    return true;
+}
+
+void RRT::follow_path(
+    const nav_msgs::msg::Path& path,
+    const std::optional<double> speed_limit)
 {
     const auto target =
         path_tracking::point_at_distance(path, lookahead_distance_);
@@ -604,8 +754,14 @@ void RRT::follow_path(const nav_msgs::msg::Path& path)
 
     ackermann_msgs::msg::AckermannDriveStamped command;
     command.header.stamp = this->now();
-    command.drive.speed = path_tracking::speed_for_steering(
+    double commanded_speed = path_tracking::speed_for_steering(
         steering, speed_profile_);
+    if (speed_limit)
+    {
+        commanded_speed = std::min(
+            commanded_speed, std::max(0.0, *speed_limit));
+    }
+    command.drive.speed = static_cast<float>(commanded_speed);
     command.drive.steering_angle = steering;
     command.drive.steering_angle_velocity = 1.0;
     if (is_vehicle_enabled_)
@@ -653,7 +809,9 @@ void RRT::publish_path_marker(
     marker.scale.x = 0.05;
     marker.action = visualization_msgs::msg::Marker::ADD;
     marker.pose.orientation.w = 1.0;
-    marker.color.g = 1.0;
+    marker.color.r = static_cast<float>(visualization_primary_color_.at(0));
+    marker.color.g = static_cast<float>(visualization_primary_color_.at(1));
+    marker.color.b = static_cast<float>(visualization_primary_color_.at(2));
     marker.color.a = 1.0;
     marker.points = points;
     path_publisher_->publish(marker);

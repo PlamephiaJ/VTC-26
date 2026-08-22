@@ -13,6 +13,7 @@ Manager::Manager(
     : trajectory_(optimal_waypoints), config_(config)
 {
     if (config_.global_goal_distance <= 0.0 || config_.rejoin_distance < 0.0 ||
+        config_.rejoin_clearance_time < 0.0 ||
         config_.progress_search_backward < 0.0 ||
         config_.progress_search_forward < 0.0 ||
         config_.projection_fallback_distance < 0.0)
@@ -30,11 +31,13 @@ void Manager::reset()
 {
     mode_ = Mode::optimal_reference;
     progress_hint_.reset();
+    rejoin_clear_since_seconds_.reset();
 }
 
 Decision Manager::update(
     const geometry_msgs::msg::Point& vehicle_position,
-    const nav_msgs::msg::OccupancyGrid& collision_map)
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const double current_time_seconds)
 {
     Decision decision;
     decision.projection = trajectory_.project(
@@ -58,12 +61,33 @@ Decision Manager::update(
     if (mode_ == Mode::optimal_reference && !decision.optimal_arc_clear)
     {
         mode_ = Mode::rrt_detour;
+        rejoin_clear_since_seconds_.reset();
     }
-    else if (mode_ == Mode::rrt_detour && decision.optimal_arc_clear &&
-             decision.vehicle_near_optimal &&
-             decision.rejoin_connector_clear)
+    else if (mode_ == Mode::rrt_detour)
     {
-        mode_ = Mode::optimal_reference;
+        const bool safe_to_rejoin = decision.optimal_arc_clear &&
+            decision.vehicle_near_optimal &&
+            decision.rejoin_connector_clear;
+        if (!safe_to_rejoin)
+        {
+            rejoin_clear_since_seconds_.reset();
+        }
+        else
+        {
+            if (!rejoin_clear_since_seconds_ ||
+                current_time_seconds < *rejoin_clear_since_seconds_)
+            {
+                rejoin_clear_since_seconds_ = current_time_seconds;
+            }
+            decision.rejoin_clearance_elapsed =
+                current_time_seconds - *rejoin_clear_since_seconds_;
+            if (decision.rejoin_clearance_elapsed >=
+                config_.rejoin_clearance_time)
+            {
+                mode_ = Mode::optimal_reference;
+                rejoin_clear_since_seconds_.reset();
+            }
+        }
     }
 
     decision.mode = mode_;

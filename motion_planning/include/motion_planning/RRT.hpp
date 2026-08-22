@@ -22,7 +22,9 @@
 
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -64,6 +66,7 @@ private:
 
     // Optimal-trajectory progress and safe rejoin parameters.
     double optimal_rejoin_distance_ = 0.5;
+    double optimal_rejoin_clear_time_ = 0.75;
     double progress_search_backward_ = 2.0;
     double progress_search_forward_ = 8.0;
     double projection_fallback_distance_ = 2.5;
@@ -73,6 +76,16 @@ private:
     double pursuit_gain_ = 0.25;
     double steering_limit_ = 0.41;
     path_tracking::SpeedProfile speed_profile_;
+    std::vector<double> visualization_primary_color_{0.1, 0.65, 1.0};
+    std::vector<double> visualization_accent_color_{0.0, 1.0, 0.65};
+
+    // Dynamic-obstacle rolling window.
+    double dynamic_obstacle_persistence_ = 0.3;
+    double dynamic_map_update_period_ = 0.05;
+
+    // LiDAR-only fallback speed control when no RRT* detour is available.
+    double blocked_path_stop_distance_ = 0.5;
+    double blocked_path_speed_gain_ = 2.0;
 
     // ROS names and runtime state.
     std::string odom_topic_ = "/ego_racecar/odom";
@@ -81,6 +94,7 @@ private:
     std::string dynamic_map_topic_ = "/ego_racecar/dynamic_map";
     std::string drive_topic_ = "/drive";
     std::string control_topic_ = "/ego_racecar/control";
+    std::string fleet_control_topic_ = "/rrt/control";
     std::string waypoint_file_path_;
     bool start_on_launch_ = false;
     bool is_vehicle_enabled_ = false;
@@ -107,6 +121,8 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscriber_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr control_subscriber_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr
+        fleet_control_subscriber_;
 
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr dynamic_map_publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr path_publisher_;
@@ -123,7 +139,14 @@ private:
     std::unique_ptr<rrt_star::Planner> planner_;
     std::vector<geometry_msgs::msg::Point> global_waypoints_;
     geometry_msgs::msg::Pose current_pose_;
-    rclcpp::Time previous_obstacle_clear_time_;
+
+    struct TimedObstacleFrame
+    {
+        double stamp_seconds = 0.0;
+        std::vector<geometry_msgs::msg::Point> points;
+    };
+    std::deque<TimedObstacleFrame> obstacle_frames_;
+    double last_dynamic_map_update_seconds_ = -1.0;
 
     // TF is kept in the ROS layer; algorithm modules consume map-frame data.
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -152,7 +175,13 @@ private:
      * Convert a planned path into one drive command and publish visualization.
      * Empty paths produce a stop command.
      */
-    void follow_path(const nav_msgs::msg::Path& path);
+    void follow_path(
+        const nav_msgs::msg::Path& path,
+        std::optional<double> speed_limit = std::nullopt);
+
+    /** Slow along a blocked optimal reference after RRT* planning fails. */
+    bool follow_blocked_reference(
+        const std::vector<geometry_msgs::msg::Point>& optimal_reference);
 
     /** Publish a zero-speed command immediately. */
     void stop_vehicle();

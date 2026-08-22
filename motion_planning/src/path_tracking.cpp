@@ -157,4 +157,17 @@ double speed_for_steering(
     return profile.sharp_turn_speed;
 }
 
+double blocked_path_speed_limit(
+    const double collision_distance, const double stop_distance,
+    const double gain)
+{
+    if (collision_distance < 0.0 || stop_distance < 0.0 || gain <= 0.0)
+    {
+        throw std::invalid_argument(
+            "collision distance and stop distance must be non-negative; "
+            "gain must be positive");
+    }
+    return std::max(0.0, (collision_distance - stop_distance) * gain);
+}
+
 }  // namespace path_tracking

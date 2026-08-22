@@ -23,6 +23,7 @@ struct ManagerConfig
 {
     double global_goal_distance = 3.5;
     double rejoin_distance = 0.5;
+    double rejoin_clearance_time = 0.75;
     double progress_search_backward = 2.0;
     double progress_search_forward = 8.0;
     double projection_fallback_distance = 2.5;
@@ -39,6 +40,7 @@ struct Decision
     bool optimal_arc_clear = false;
     bool vehicle_near_optimal = false;
     bool rejoin_connector_clear = false;
+    double rejoin_clearance_elapsed = 0.0;
 };
 
 /**
@@ -71,12 +73,14 @@ public:
      *
      * Transition rules:
      * - optimal -> RRT when the optimal arc to the global goal is blocked;
-     * - RRT -> optimal only when that arc is clear, the vehicle is within the
-     *   rejoin distance, and the short vehicle-to-projection connector is clear.
+     * - RRT -> optimal only when that arc and the short connector remain clear
+     *   for the configured clearance time while the vehicle stays within the
+     *   rejoin distance.
      */
     Decision update(
         const geometry_msgs::msg::Point& vehicle_position,
-        const nav_msgs::msg::OccupancyGrid& collision_map);
+        const nav_msgs::msg::OccupancyGrid& collision_map,
+        double current_time_seconds);
 
     /** Return the currently active reference source without updating state. */
     Mode mode() const;
@@ -89,6 +93,7 @@ private:
     ManagerConfig config_;
     Mode mode_ = Mode::optimal_reference;
     std::optional<double> progress_hint_;
+    std::optional<double> rejoin_clear_since_seconds_;
 };
 
 }  // namespace reference_path

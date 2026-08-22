@@ -50,7 +50,16 @@ Laser scans follow a separate short flow:
 1. `dynamic_obstacles::valid_hit_points()` filters ranges and creates
    laser-frame hit points.
 2. `RRT` applies TF because frame lookup is a ROS responsibility.
-3. `dynamic_obstacles::MapLayer` inserts and periodically clears observations.
+3. `RRT` retains sampled scans in a short rolling time window, rebuilds the
+   dynamic layer at a configured fixed rate, and expires only old frames.
+
+No planner subscribes to another vehicle's odometry. A moving vehicle is just
+another obstacle observed by the current vehicle's own LiDAR. When RRT* cannot
+find a detour, the node measures the arc distance to the first occupied point
+on its blocked optimal reference and applies a proportional speed cap. It
+therefore slows or stops using only its own perception. Returning from RRT mode
+also requires all safe-rejoin conditions to remain continuously true for the
+configured clearance time, which rejects one-frame obstacle dropouts.
 
 ## Interface contract convention
 
@@ -87,15 +96,21 @@ Each vehicle entry also owns its `SPEED_STRAIGHT`, `SPEED_MEDIUM_TURN`, and
 thresholds select between those three levels. Speed values must satisfy
 `straight >= medium turn >= sharp turn > 0`.
 
+Each vehicle also has an RGB `VISUALIZATION_PRIMARY_COLOR` for its path, goal,
+and RRT branches, plus a `VISUALIZATION_ACCENT_COLOR` for its lookahead point
+and RRT nodes. The default ego palette is blue/cyan and the opponent palette is
+orange/magenta.
+
 Both nodes share `/map`, but keep their dynamic maps and all relative
 visualization topics inside their own namespaces. The node derives each
 vehicle's TF frames from its namespace (`<namespace>/base_link` and
 `<namespace>/laser`). The original single-car `launch.namespace` YAML format
 is still supported when `launch.vehicles` is absent.
 
-With the default safety setting (`start_on_launch: false`), start or stop each
-car independently, or use the repository-level `startrun.sh` and `stoprun.sh`
-scripts to send the command to both cars concurrently:
+With the default safety setting (`start_on_launch: false`), the per-vehicle
+topics still start or stop one car independently. The repository-level
+`startrun.sh` and `stoprun.sh` publish one message to `/rrt/control`, which both
+RRT nodes subscribe to, so the two commands share one publisher and DDS sample:
 
 ```bash
 ros2 topic pub --once /ego_racecar/control std_msgs/msg/String "{data: start}"
@@ -104,4 +119,13 @@ ros2 topic pub --once /ego_racecar/control std_msgs/msg/String "{data: stop}"
 ros2 topic pub --once /opp_racecar/control std_msgs/msg/String "{data: stop}"
 ./startrun.sh
 ./stoprun.sh
+./startrun.sh ego
+./stoprun.sh ego
+./startrun.sh opp
+./stoprun.sh opp
 ```
+
+With no argument, each script controls all running vehicles through the shared
+topic. The publisher waits until both RRT subscribers have been discovered
+before sending the single shared command. Pass `ego`/`1` or `opp`/`2` to
+control only that vehicle.

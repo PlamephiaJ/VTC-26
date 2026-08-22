@@ -193,3 +193,47 @@ bool occupancy_grid::polyline_is_blocked(
     }
     return false;
 }
+
+std::optional<double> occupancy_grid::distance_to_first_collision(
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const std::vector<geometry_msgs::msg::Point>& points)
+{
+    if (points.empty())
+    {
+        return std::nullopt;
+    }
+    if (collision_map.info.resolution <= 0.0)
+    {
+        return 0.0;
+    }
+    if (is_xy_coord_occupied(
+            collision_map, points.front().x, points.front().y))
+    {
+        return 0.0;
+    }
+
+    double accumulated_distance = 0.0;
+    for (std::size_t i = 1; i < points.size(); ++i)
+    {
+        const auto& start = points.at(i - 1);
+        const auto& end = points.at(i);
+        const double segment_length = std::hypot(
+            end.x - start.x, end.y - start.y);
+        const int sample_count = std::max(
+            1, static_cast<int>(
+                std::ceil(segment_length / collision_map.info.resolution)));
+        for (int sample = 1; sample <= sample_count; ++sample)
+        {
+            const double ratio =
+                static_cast<double>(sample) / sample_count;
+            const double x = start.x + ratio * (end.x - start.x);
+            const double y = start.y + ratio * (end.y - start.y);
+            if (is_xy_coord_occupied(collision_map, x, y))
+            {
+                return accumulated_distance + ratio * segment_length;
+            }
+        }
+        accumulated_distance += segment_length;
+    }
+    return std::nullopt;
+}

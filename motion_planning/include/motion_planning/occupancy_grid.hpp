@@ -4,6 +4,7 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -97,6 +98,15 @@ bool segment_is_blocked(
  * Empty input is blocked; a single point checks that point directly.
  */
 bool polyline_is_blocked(
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const std::vector<geometry_msgs::msg::Point>& points);
+
+/**
+ * Return arc length from the first polyline point to its first occupied cell.
+ * A clear or empty polyline returns std::nullopt. Invalid maps fail closed and
+ * return zero.
+ */
+std::optional<double> distance_to_first_collision(
     const nav_msgs::msg::OccupancyGrid& collision_map,
     const std::vector<geometry_msgs::msg::Point>& points);
 

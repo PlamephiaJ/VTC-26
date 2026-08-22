@@ -73,6 +73,13 @@ double pure_pursuit_steering(
 double speed_for_steering(
     double steering_angle, const SpeedProfile& profile = SpeedProfile{});
 
+/**
+ * Compute a LiDAR-only speed cap for following a blocked reference.
+ * Returns max(0, (collision_distance - stop_distance) * gain).
+ */
+double blocked_path_speed_limit(
+    double collision_distance, double stop_distance, double gain);
+
 }  // namespace path_tracking
 
 #endif  // MOTION_PLANNING__PATH_TRACKING_HPP_

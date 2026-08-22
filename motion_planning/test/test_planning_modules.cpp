@@ -187,7 +187,8 @@ TEST(ReferencePathManager, UsesOptimalReferenceWhenForwardArcIsClear)
         point(0.0, 0.0), point(4.0, 0.0),
         point(4.0, 4.0), point(0.0, 4.0)}, config);
 
-    const auto decision = manager.update(point(0.0, 0.0), make_precise_grid());
+    const auto decision = manager.update(
+        point(0.0, 0.0), make_precise_grid(), 0.0);
 
     EXPECT_EQ(reference_path::Mode::optimal_reference, decision.mode);
     EXPECT_FALSE(decision.mode_changed);
@@ -206,13 +207,14 @@ TEST(ReferencePathManager, UsesRrtOnlyUntilSafeOptimalRejoin)
     config.progress_search_backward = 2.0;
     config.progress_search_forward = 8.0;
     config.projection_fallback_distance = 2.5;
+    config.rejoin_clearance_time = 0.5;
     reference_path::Manager manager({
         point(0.0, 0.0), point(4.0, 0.0),
         point(4.0, 4.0), point(0.0, 4.0)}, config);
     auto grid = make_precise_grid();
 
     occupancy_grid::set_xy_coord_occupied(grid, 2.0, 0.0);
-    const auto blocked = manager.update(point(0.0, 0.0), grid);
+    const auto blocked = manager.update(point(0.0, 0.0), grid, 0.0);
     EXPECT_EQ(reference_path::Mode::rrt_detour, blocked.mode);
     EXPECT_TRUE(blocked.mode_changed);
     EXPECT_FALSE(blocked.optimal_arc_clear);
@@ -220,13 +222,13 @@ TEST(ReferencePathManager, UsesRrtOnlyUntilSafeOptimalRejoin)
     EXPECT_DOUBLE_EQ(0.0, blocked.global_goal.y);
 
     std::fill(grid.data.begin(), grid.data.end(), 0);
-    const auto too_far = manager.update(point(2.0, 2.0), grid);
+    const auto too_far = manager.update(point(2.0, 2.0), grid, 0.1);
     EXPECT_EQ(reference_path::Mode::rrt_detour, too_far.mode);
     EXPECT_TRUE(too_far.optimal_arc_clear);
     EXPECT_FALSE(too_far.vehicle_near_optimal);
 
     occupancy_grid::set_xy_coord_occupied(grid, 2.0, 0.2);
-    const auto unsafe_connector = manager.update(point(2.0, 0.4), grid);
+    const auto unsafe_connector = manager.update(point(2.0, 0.4), grid, 0.2);
     EXPECT_EQ(reference_path::Mode::rrt_detour, unsafe_connector.mode);
     EXPECT_TRUE(unsafe_connector.optimal_arc_clear);
     EXPECT_TRUE(unsafe_connector.vehicle_near_optimal);
@@ -235,9 +237,20 @@ TEST(ReferencePathManager, UsesRrtOnlyUntilSafeOptimalRejoin)
     EXPECT_DOUBLE_EQ(1.0, unsafe_connector.global_goal.y);
 
     std::fill(grid.data.begin(), grid.data.end(), 0);
-    const auto rejoined = manager.update(point(2.0, 0.4), grid);
+    const auto first_clear = manager.update(point(2.0, 0.4), grid, 0.3);
+    EXPECT_EQ(reference_path::Mode::rrt_detour, first_clear.mode);
+    EXPECT_FALSE(first_clear.mode_changed);
+    EXPECT_DOUBLE_EQ(0.0, first_clear.rejoin_clearance_elapsed);
+
+    const auto still_waiting = manager.update(point(2.0, 0.4), grid, 0.7);
+    EXPECT_EQ(reference_path::Mode::rrt_detour, still_waiting.mode);
+    EXPECT_FALSE(still_waiting.mode_changed);
+    EXPECT_NEAR(0.4, still_waiting.rejoin_clearance_elapsed, 1e-9);
+
+    const auto rejoined = manager.update(point(2.0, 0.4), grid, 0.81);
     EXPECT_EQ(reference_path::Mode::optimal_reference, rejoined.mode);
     EXPECT_TRUE(rejoined.mode_changed);
+    EXPECT_NEAR(0.51, rejoined.rejoin_clearance_elapsed, 1e-9);
     EXPECT_TRUE(rejoined.optimal_arc_clear);
     EXPECT_TRUE(rejoined.vehicle_near_optimal);
     EXPECT_TRUE(rejoined.rejoin_connector_clear);

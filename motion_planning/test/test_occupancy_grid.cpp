@@ -2,6 +2,8 @@
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
+
 nav_msgs::msg::OccupancyGrid create_grid(const int width, const int height)
 {
     nav_msgs::msg::OccupancyGrid grid;
@@ -98,4 +100,28 @@ TEST(OccupancyGrid, PolylineCollisionChecksEverySegment)
 
     EXPECT_TRUE(occupancy_grid::polyline_is_blocked(
         grid, {first, middle, last}));
+}
+
+TEST(OccupancyGrid, MeasuresDistanceToFirstPolylineCollision)
+{
+    auto grid = create_grid(7, 5);
+    occupancy_grid::set_xy_coord_occupied(grid, 2.0, 0.0);
+    geometry_msgs::msg::Point first;
+    first.x = 0.0;
+    first.y = 0.0;
+    geometry_msgs::msg::Point middle;
+    middle.x = 1.0;
+    middle.y = 0.0;
+    geometry_msgs::msg::Point last;
+    last.x = 4.0;
+    last.y = 0.0;
+
+    const auto distance = occupancy_grid::distance_to_first_collision(
+        grid, {first, middle, last});
+
+    ASSERT_TRUE(distance.has_value());
+    EXPECT_DOUBLE_EQ(2.0, *distance);
+    std::fill(grid.data.begin(), grid.data.end(), 0);
+    EXPECT_FALSE(occupancy_grid::distance_to_first_collision(
+        grid, {first, middle, last}).has_value());
 }

@@ -2,6 +2,8 @@
 
 #include "gtest/gtest.h"
 
+#include <stdexcept>
+
 namespace
 {
 
@@ -99,4 +101,17 @@ TEST(PathTracking, SelectsSpeedFromSteeringMagnitude)
         1.0, path_tracking::speed_for_steering(15.0 * pi / 180.0, profile));
     EXPECT_DOUBLE_EQ(
         0.5, path_tracking::speed_for_steering(25.0 * pi / 180.0, profile));
+}
+
+TEST(PathTracking, CapsSpeedFromBlockedPathDistance)
+{
+    EXPECT_DOUBLE_EQ(
+        0.0, path_tracking::blocked_path_speed_limit(0.4, 0.5, 2.0));
+    EXPECT_DOUBLE_EQ(
+        0.0, path_tracking::blocked_path_speed_limit(0.5, 0.5, 2.0));
+    EXPECT_DOUBLE_EQ(
+        2.0, path_tracking::blocked_path_speed_limit(1.5, 0.5, 2.0));
+    EXPECT_THROW(
+        path_tracking::blocked_path_speed_limit(1.0, 0.5, 0.0),
+        std::invalid_argument);
 }
