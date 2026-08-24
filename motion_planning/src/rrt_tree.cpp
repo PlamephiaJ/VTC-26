@@ -72,9 +72,12 @@ std::vector<std::size_t> near_indices(
     }
 
     std::vector<std::size_t> result;
+    const double radius_squared = radius * radius;
+    const Point2D query_point{query.x, query.y};
     for (std::size_t i = 0; i < tree.size(); ++i)
     {
-        if (edge_length(tree.at(i), query) < radius)
+        const Node& candidate = tree.at(i);
+        if (squared_distance({candidate.x, candidate.y}, query_point) < radius_squared)
         {
             result.emplace_back(i);
         }

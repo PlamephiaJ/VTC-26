@@ -59,6 +59,19 @@ TEST(RrtTree, SteersByAtMostConfiguredStep)
     EXPECT_DOUBLE_EQ(2.0, result.y);
 }
 
+TEST(RrtTree, NearIndicesUsesStrictRadius)
+{
+    rrt_star::Tree tree(4);
+    tree.at(1).x = 0.5;
+    tree.at(2).x = 0.6;
+    tree.at(2).y = 0.8;
+    tree.at(3).x = 1.001;
+
+    const auto result = rrt_star::near_indices(tree, {}, 1.0);
+
+    EXPECT_EQ((std::vector<std::size_t>{0, 1}), result);
+}
+
 TEST(RrtTree, ReparentMaintainsLinksAndDescendantCosts)
 {
     rrt_star::Tree tree(5);
