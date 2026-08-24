@@ -84,6 +84,24 @@ TEST(OccupancyGrid, SegmentCollisionSupportsPlannerRootEscape)
         dynamic_grid, start, end, options));
 }
 
+TEST(OccupancyGrid, DdaVisitsEveryCrossedCell)
+{
+    nav_msgs::msg::OccupancyGrid grid;
+    grid.info.width = 4;
+    grid.info.height = 3;
+    grid.info.resolution = 1.0;
+    grid.data.resize(12, 0);
+    grid.data.at(2) = 100;
+    geometry_msgs::msg::Point start;
+    start.x = 0.1;
+    start.y = 0.1;
+    geometry_msgs::msg::Point end;
+    end.x = 2.9;
+    end.y = 1.1;
+
+    EXPECT_TRUE(occupancy_grid::segment_is_blocked(grid, start, end));
+}
+
 TEST(OccupancyGrid, PolylineCollisionChecksEverySegment)
 {
     auto grid = create_grid(5, 5);

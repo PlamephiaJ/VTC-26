@@ -6,9 +6,20 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 
 #include <vector>
+#include <chrono>
 
 namespace dynamic_obstacles
 {
+
+/** Measurements for one clear/rasterize/inflate dynamic-map rebuild. */
+struct RebuildProfile
+{
+    std::chrono::nanoseconds clear{0};
+    std::chrono::nanoseconds rasterize_and_inflate{0};
+    std::chrono::nanoseconds total{0};
+    std::size_t observation_count = 0;
+    std::size_t changed_cell_count = 0;
+};
 
 /**
  * Convert valid planar laser ranges into points in the laser frame.
@@ -58,6 +69,14 @@ public:
      */
     std::size_t add_observation(
         const geometry_msgs::msg::Point& map_point, double inflation_margin);
+
+    /**
+     * Rebuild the live layer from a complete fixed-rate observation window.
+     * Return: independently measured clear, rasterize/inflate, and total time.
+     */
+    RebuildProfile rebuild_observations(
+        const std::vector<geometry_msgs::msg::Point>& map_points,
+        double inflation_margin);
 
     /**
      * Remove every live obstacle added since the previous clear.

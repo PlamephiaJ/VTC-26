@@ -5,6 +5,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <random>
@@ -25,6 +26,18 @@ struct PlannerConfig
     double goal_sample_rate = 0.1;
     double static_margin = 0.2;
     double dynamic_margin = 0.22;
+};
+
+/** Exclusive wall-clock segments accumulated inside one plan() call. */
+struct PlanProfile
+{
+    std::chrono::nanoseconds sampling{0};
+    std::chrono::nanoseconds nearest{0};
+    std::chrono::nanoseconds initial_collision{0};
+    std::chrono::nanoseconds near{0};
+    std::chrono::nanoseconds parent_collision{0};
+    std::chrono::nanoseconds rewiring{0};
+    std::chrono::nanoseconds total{0};
 };
 
 /** Why a planning call ended without a path. */
@@ -49,6 +62,7 @@ struct PlanResult
     Tree tree;
     std::vector<Node> path;
     std::size_t goal_candidate_count = 0;
+    PlanProfile profile;
 };
 
 /**

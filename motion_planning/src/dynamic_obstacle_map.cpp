@@ -3,6 +3,7 @@
 #include "motion_planning/occupancy_grid.hpp"
 
 #include <cmath>
+#include <chrono>
 #include <stdexcept>
 
 namespace dynamic_obstacles
@@ -97,6 +98,28 @@ std::size_t MapLayer::add_observation(
     changed_indices_.insert(
         changed_indices_.end(), changes.begin(), changes.end());
     return changes.size();
+}
+
+RebuildProfile MapLayer::rebuild_observations(
+    const std::vector<geometry_msgs::msg::Point>& map_points,
+    const double inflation_margin)
+{
+    using Clock = std::chrono::steady_clock;
+    RebuildProfile profile;
+    profile.observation_count = map_points.size();
+    const auto total_start = Clock::now();
+    const auto clear_start = total_start;
+    clear_observations();
+    const auto raster_start = Clock::now();
+    profile.clear = raster_start - clear_start;
+    for (const auto& point : map_points)
+    {
+        profile.changed_cell_count += add_observation(point, inflation_margin);
+    }
+    const auto end = Clock::now();
+    profile.rasterize_and_inflate = end - raster_start;
+    profile.total = end - total_start;
+    return profile;
 }
 
 void MapLayer::clear_observations()

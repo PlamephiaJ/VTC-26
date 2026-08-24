@@ -80,10 +80,10 @@ std::vector<int> inflate_cell(
 void inflate_map(nav_msgs::msg::OccupancyGrid& grid, float margin);
 
 /**
- * Test one map-frame segment against the grid at cell-resolution spacing.
+ * Test one map-frame segment using DDA cell traversal.
  *
  * Input: collision map, endpoints, and optional root-escape settings.
- * Return: true when any sampled cell is occupied/outside or the map is invalid.
+ * Return: true when any traversed cell is occupied/outside or the map is invalid.
  * When an escape reference map is supplied, occupied cells near the segment
  * start are allowed only if the same cells are free in that reference map.
  */

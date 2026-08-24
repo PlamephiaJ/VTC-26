@@ -603,15 +603,19 @@ void RRT::scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr messag
         obstacle_frames_.pop_front();
     }
 
-    obstacle_map_.clear_observations();
+    std::vector<geometry_msgs::msg::Point> active_observations;
     for (const auto& frame : obstacle_frames_)
     {
-        for (const auto& map_point : frame.points)
-        {
-            obstacle_map_.add_observation(
-                map_point, detected_obstacle_margin_);
-        }
+        active_observations.insert(
+            active_observations.end(), frame.points.begin(), frame.points.end());
     }
+    const auto rebuild_profile = obstacle_map_.rebuild_observations(
+        active_observations, detected_obstacle_margin_);
+    RCLCPP_DEBUG(
+        this->get_logger(),
+        "Dynamic-map rebuild: %.3f ms (%zu observations, %zu changed cells)",
+        std::chrono::duration<double, std::milli>(rebuild_profile.total).count(),
+        rebuild_profile.observation_count, rebuild_profile.changed_cell_count);
     dynamic_map_publisher_->publish(obstacle_map_.collision_map());
 }
 
@@ -674,6 +678,18 @@ void RRT::odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr message)
         {reference.global_goal.x, reference.global_goal.y},
         obstacle_map_.collision_map(),
         obstacle_map_.base_map());
+    const auto profile_ms = [](const std::chrono::nanoseconds duration)
+    {
+        return std::chrono::duration<double, std::milli>(duration).count();
+    };
+    RCLCPP_DEBUG(
+        this->get_logger(),
+        "RRT* profile ms: sampling=%.3f nearest=%.3f initial_collision=%.3f "
+        "near=%.3f parent_collision=%.3f rewiring=%.3f total=%.3f",
+        profile_ms(plan.profile.sampling), profile_ms(plan.profile.nearest),
+        profile_ms(plan.profile.initial_collision), profile_ms(plan.profile.near),
+        profile_ms(plan.profile.parent_collision),
+        profile_ms(plan.profile.rewiring), profile_ms(plan.profile.total));
 
     if (!plan.success)
     {

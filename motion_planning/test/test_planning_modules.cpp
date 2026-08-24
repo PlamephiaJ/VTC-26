@@ -150,6 +150,21 @@ TEST(DynamicObstacleMap, ClearingObservationRestoresStaticLayer)
     EXPECT_EQ(0, layer.collision_map().data.at(210));
 }
 
+TEST(DynamicObstacleMap, RebuildProfilesAndReplacesObservationSet)
+{
+    dynamic_obstacles::MapLayer layer;
+    layer.initialize(make_free_grid(), 0.0);
+
+    const auto first = layer.rebuild_observations({point(0.0, 0.0)}, 0.5);
+    EXPECT_EQ(1u, first.observation_count);
+    EXPECT_GT(first.changed_cell_count, 0u);
+    EXPECT_GT(first.total.count(), 0);
+
+    layer.rebuild_observations({point(2.0, 0.0)}, 0.0);
+    EXPECT_EQ(0, layer.collision_map().data.at(210));
+    EXPECT_GT(layer.collision_map().data.at(214), 50);
+}
+
 TEST(OptimalTrajectory, ProjectsSamplesAndSlicesByArcLength)
 {
     const std::vector<geometry_msgs::msg::Point> waypoints = {
@@ -290,4 +305,11 @@ TEST(RrtStarPlanner, FindsDirectPathInFreeMap)
     ASSERT_EQ(2u, result.path.size());
     EXPECT_DOUBLE_EQ(0.0, result.path.front().x);
     EXPECT_DOUBLE_EQ(1.0, result.path.back().x);
+    EXPECT_GT(result.profile.total.count(), 0);
+    EXPECT_LE(result.profile.sampling, result.profile.total);
+    EXPECT_LE(result.profile.nearest, result.profile.total);
+    EXPECT_LE(result.profile.initial_collision, result.profile.total);
+    EXPECT_LE(result.profile.near, result.profile.total);
+    EXPECT_LE(result.profile.parent_collision, result.profile.total);
+    EXPECT_LE(result.profile.rewiring, result.profile.total);
 }

@@ -10,6 +10,108 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+namespace
+{
+
+bool cell_is_occupied(
+    const nav_msgs::msg::OccupancyGrid& grid, const int x, const int y)
+{
+    const int index = occupancy_grid::xy_index_to_array_index(grid, x, y);
+    return index < 0 ||
+        static_cast<int>(grid.data[static_cast<std::size_t>(index)]) >
+            occupancy_grid::OCCUPIED_THRESHOLD;
+}
+
+bool segment_is_blocked_dda(
+    const nav_msgs::msg::OccupancyGrid& collision_map,
+    const geometry_msgs::msg::Point& start,
+    const geometry_msgs::msg::Point& end,
+    const occupancy_grid::SegmentCheckOptions& options)
+{
+    const double resolution = collision_map.info.resolution;
+    const double origin_x = collision_map.info.origin.position.x;
+    const double origin_y = collision_map.info.origin.position.y;
+    int cell_x = static_cast<int>(std::floor((start.x - origin_x) / resolution));
+    int cell_y = static_cast<int>(std::floor((start.y - origin_y) / resolution));
+    const int end_x = static_cast<int>(std::floor((end.x - origin_x) / resolution));
+    const int end_y = static_cast<int>(std::floor((end.y - origin_y) / resolution));
+    if (occupancy_grid::xy_index_to_array_index(collision_map, cell_x, cell_y) < 0 ||
+        occupancy_grid::xy_index_to_array_index(collision_map, end_x, end_y) < 0)
+    {
+        return true;
+    }
+
+    const double dx = end.x - start.x;
+    const double dy = end.y - start.y;
+    const int step_x = (dx > 0.0) - (dx < 0.0);
+    const int step_y = (dy > 0.0) - (dy < 0.0);
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double t_delta_x = step_x == 0 ? infinity : resolution / std::abs(dx);
+    const double t_delta_y = step_y == 0 ? infinity : resolution / std::abs(dy);
+    const double next_x = origin_x + (cell_x + (step_x > 0 ? 1 : 0)) * resolution;
+    const double next_y = origin_y + (cell_y + (step_y > 0 ? 1 : 0)) * resolution;
+    double t_max_x = step_x == 0 ? infinity : (next_x - start.x) / dx;
+    double t_max_y = step_y == 0 ? infinity : (next_y - start.y) / dy;
+    t_max_x = std::max(0.0, t_max_x);
+    t_max_y = std::max(0.0, t_max_y);
+
+    const bool escape_enabled = options.escape_reference_map != nullptr &&
+        options.start_escape_distance > 0.0 &&
+        cell_is_occupied(collision_map, cell_x, cell_y) &&
+        !cell_is_occupied(*options.escape_reference_map, cell_x, cell_y);
+    const double escape_distance_squared =
+        options.start_escape_distance * options.start_escape_distance;
+    double entry_t = 0.0;
+
+    while (true)
+    {
+        if (cell_is_occupied(collision_map, cell_x, cell_y))
+        {
+            const double x = start.x + std::min(1.0, entry_t) * dx;
+            const double y = start.y + std::min(1.0, entry_t) * dy;
+            const double escape_dx = x - start.x;
+            const double escape_dy = y - start.y;
+            const bool inside_escape_region =
+                escape_dx * escape_dx + escape_dy * escape_dy <=
+                escape_distance_squared;
+            if (!(escape_enabled && inside_escape_region &&
+                  !cell_is_occupied(
+                      *options.escape_reference_map, cell_x, cell_y)))
+            {
+                return true;
+            }
+        }
+        if (cell_x == end_x && cell_y == end_y)
+        {
+            return false;
+        }
+
+        if (t_max_x < t_max_y)
+        {
+            entry_t = t_max_x;
+            t_max_x += t_delta_x;
+            cell_x += step_x;
+        }
+        else if (t_max_y < t_max_x)
+        {
+            entry_t = t_max_y;
+            t_max_y += t_delta_y;
+            cell_y += step_y;
+        }
+        else
+        {
+            entry_t = t_max_x;
+            t_max_x += t_delta_x;
+            t_max_y += t_delta_y;
+            cell_x += step_x;
+            cell_y += step_y;
+        }
+    }
+}
+
+}  // namespace
 
 int occupancy_grid::xy_index_to_array_index(const nav_msgs::msg::OccupancyGrid& grid, const int i_x, const int i_y)
 {
@@ -133,42 +235,7 @@ bool occupancy_grid::segment_is_blocked(
         return true;
     }
 
-    const int x_steps = static_cast<int>(
-        std::ceil(std::abs(start.x - end.x) / collision_map.info.resolution));
-    const int y_steps = static_cast<int>(
-        std::ceil(std::abs(start.y - end.y) / collision_map.info.resolution));
-    const int sample_count = std::max(x_steps, y_steps);
-    const bool escape_enabled = options.escape_reference_map != nullptr &&
-        options.start_escape_distance > 0.0 &&
-        is_xy_coord_occupied(collision_map, start.x, start.y) &&
-        !is_xy_coord_occupied(
-            *options.escape_reference_map, start.x, start.y);
-    const double escape_distance_squared =
-        options.start_escape_distance * options.start_escape_distance;
-
-    for (int i = 0; i <= sample_count; ++i)
-    {
-        const double ratio = sample_count > 0 ?
-            static_cast<double>(i) / sample_count : 0.0;
-        const double x = start.x + ratio * (end.x - start.x);
-        const double y = start.y + ratio * (end.y - start.y);
-        if (!is_xy_coord_occupied(collision_map, x, y))
-        {
-            continue;
-        }
-
-        const double dx = x - start.x;
-        const double dy = y - start.y;
-        const bool inside_escape_region =
-            dx * dx + dy * dy <= escape_distance_squared;
-        if (escape_enabled && inside_escape_region &&
-            !is_xy_coord_occupied(*options.escape_reference_map, x, y))
-        {
-            continue;
-        }
-        return true;
-    }
-    return false;
+    return segment_is_blocked_dda(collision_map, start, end, options);
 }
 
 bool occupancy_grid::polyline_is_blocked(
