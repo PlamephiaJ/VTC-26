@@ -22,6 +22,7 @@
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>teleop_twist_keyboard</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>f1tenth_rviz_plugins</exec_depend>
   <exec_depend>foxglove_bridge</exec_depend>
   
   <depend>python3-scipy</depend>

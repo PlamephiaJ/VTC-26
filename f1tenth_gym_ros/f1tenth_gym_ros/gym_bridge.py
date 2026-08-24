@@ -69,7 +69,7 @@ from f1tenth_gym.envs.track import Track, Raceline
 
 
 def opp_suffix(opp_index):
-    """Suffix appended to opponent namespaces/topics: '' for opp 1, '2'/'3' after."""
+    """Suffix appended to opponent names/topics: empty for opp 1, its index after."""
     return '' if opp_index == 1 else str(opp_index)
 
 
@@ -442,8 +442,8 @@ class GymBridge(Node):
                 opp.drive_topic,
                 partial(self.opp_drive_callback, opp_index=i),
                 10)
-            # First opponent keeps the original /goal_pose reset topic,
-            # later ones get /goal_pose2, /goal_pose3.
+            # First opponent keeps the original /goal_pose reset topic;
+            # later ones get /goal_pose2, /goal_pose3, and so on.
             opp.reset_sub = self.create_subscription(
                 PoseStamped,
                 '/goal_pose' + opp_suffix(i + 1),

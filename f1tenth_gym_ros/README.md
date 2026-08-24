@@ -116,8 +116,12 @@ You can then run another node by creating another bash session in `tmux` or a se
 ```bash
 ros2 launch f1tenth_gym_ros gym_bridge_launch.py num_agent:=4
 ```
-- The shipped `sim.yaml` starts two cars by default: `ego_racecar` and
-  `opp_racecar`. Use `num_agent:=1` when a single-car simulation is needed.
+- The shipped `sim.yaml` starts five cars by default: `ego_racecar`,
+  `opp_racecar`, `opp_racecar2`, `opp_racecar3`, and `opp_racecar4`. Use
+  `num_agent:=1` when a single-car simulation is needed.
+- In RViz, use `2D Pose Estimate` for the ego and the existing `2D Goal Pose`
+  for Car 2. The numbered `Car 3`, `Car 4`, and `Car 5` toolbar tools reset the
+  remaining cars independently. Their shortcuts are `3`, `4`, and `5`.
 - The ego and opponent starting poses can also be changed via parameters (`sx`/`sy`/`stheta` for the ego, `sx1`/`sy1`/`stheta1` onwards for the opponents), these are in the global map coordinate frame. Every agent you ask for needs a start pose: if `num_agent` is 3 but `sx2`/`sy2`/`stheta2` are missing, the bridge stops and tells you which parameters to add rather than guessing a spot on the map for you. The poses shipped in `sim.yaml` line up eight cars on the Levine map (two rows of four), so anything up to `num_agent:=8` works out of the box; add `sx8`/`sy8`/`stheta8` and so on to race more, and change them when you change the map.
 - A different sim config can be selected at launch time. The value is a file name in `config/`, a package relative path, or an absolute path:
 ```bash
@@ -146,17 +150,17 @@ In **single** agent:
 
 A `tf` tree is also maintained.
 
-With **multiple** agents (2-4):
+With **multiple** agents (the default is 5):
 
-In addition to the topics available in the single agent scenario, these topics are also available for each opponent. Opponent namespaces and topics carry the opponent's index as a suffix — the first opponent has no suffix (identical to the previous two-agent setup), the second and third use `2` and `3`:
+In addition to the topics available in the single agent scenario, these topics are also available for each opponent. Opponent namespaces and topics carry the opponent's index as a suffix — the first opponent has no suffix (identical to the previous two-agent setup), and later opponents use `2`, `3`, `4`, and so on:
 
-`/opp_scan`, `/opp_scan2`, `/opp_scan3`: The opponent agents' laser scans
+`/opp_scan`, `/opp_scan2`, `/opp_scan3`, `/opp_scan4`: The opponent agents' laser scans
 
-`/ego_racecar/opp_odom`, `/ego_racecar/opp_odom2`, `/ego_racecar/opp_odom3`: The opponent agents' odometry for the ego agent's planner
+`/ego_racecar/opp_odom`, `/ego_racecar/opp_odom2`, `/ego_racecar/opp_odom3`, `/ego_racecar/opp_odom4`: The opponent agents' odometry for the ego agent's planner
 
-`/opp_racecar/odom`, `/opp_racecar2/odom`, `/opp_racecar3/odom`: The opponent agents' odometry
+`/opp_racecar/odom`, `/opp_racecar2/odom`, `/opp_racecar3/odom`, `/opp_racecar4/odom`: The opponent agents' odometry
 
-`/opp_racecar/opp_odom`, `/opp_racecar2/opp_odom`, `/opp_racecar3/opp_odom`: The ego agent's odometry for each opponent agent's planner
+`/opp_racecar/opp_odom`, `/opp_racecar2/opp_odom`, `/opp_racecar3/opp_odom`, `/opp_racecar4/opp_odom`: The ego agent's odometry for each opponent agent's planner
 
 # Topics subscribed by the simulation
 
@@ -164,15 +168,15 @@ In **single** agent:
 
 `/drive`: The ego agent's drive command via `AckermannDriveStamped` messages
 
-`/initalpose`: This is the topic for resetting the ego's pose via RViz's Foxglove's 2D Pose Estimate tool.
+`/initialpose`: This is the topic for resetting the ego's pose via RViz's or Foxglove's 2D Pose Estimate tool.
 
-With **multiple** agents (2-4):
+With **multiple** agents (the default is 5):
 
 In addition to all topics in the single agent scenario, these topics are also available:
 
-`/opp_drive`, `/opp_drive2`, `/opp_drive3`: The opponent agents' drive commands via `AckermannDriveStamped` messages. Note that each car only moves when something publishes to its own drive topic.
+`/opp_drive`, `/opp_drive2`, `/opp_drive3`, `/opp_drive4`: The opponent agents' independent drive commands via `AckermannDriveStamped` messages. No opponent controller is started by the simulator; each car only moves when something publishes to its own drive topic.
 
-`/goal_pose`, `/goal_pose2`, `/goal_pose3`: These are the topics for resetting an opponent agent's pose. RViz's or Foxglove's 2D Goal Pose tool publishes to `/goal_pose` (first opponent).
+`/goal_pose`, `/goal_pose2`, `/goal_pose3`, `/goal_pose4`: These are the topics for independently resetting the opponent agents. RViz's standard 2D Goal Pose tool publishes to `/goal_pose` (Car 2), while the numbered Car 3-5 tools publish to the correspondingly suffixed topics.
 
 # Keyboard Teleop
 

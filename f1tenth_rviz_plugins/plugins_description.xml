@@ -1,0 +1,20 @@
+<library path="f1tenth_rviz_plugins">
+  <class
+    name="f1tenth_rviz_plugins/Car3Pose"
+    type="f1tenth_rviz_plugins::Car3PoseTool"
+    base_class_type="rviz_common::Tool">
+    <description>Click and drag to reset Car 3 on /goal_pose2.</description>
+  </class>
+  <class
+    name="f1tenth_rviz_plugins/Car4Pose"
+    type="f1tenth_rviz_plugins::Car4PoseTool"
+    base_class_type="rviz_common::Tool">
+    <description>Click and drag to reset Car 4 on /goal_pose3.</description>
+  </class>
+  <class
+    name="f1tenth_rviz_plugins/Car5Pose"
+    type="f1tenth_rviz_plugins::Car5PoseTool"
+    base_class_type="rviz_common::Tool">
+    <description>Click and drag to reset Car 5 on /goal_pose4.</description>
+  </class>
+</library>
