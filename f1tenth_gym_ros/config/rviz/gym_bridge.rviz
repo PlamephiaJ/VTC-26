@@ -68,8 +68,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: -46.7182502746582
-        Min Value: -49.78242492675781
+        Max Value: -1.0438792705535889
+        Min Value: -26.41290855407715
         Value: true
       Axis: X
       Channel Name: intensity
@@ -518,7 +518,7 @@ Visualization Manager:
       Enabled: true
       Name: Global Waypoints
       Namespaces:
-        global_waypoints: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Transient Local
@@ -531,7 +531,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        goal: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -544,7 +544,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        lookahead: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -557,7 +557,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        path: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -583,7 +583,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        branch: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -596,7 +596,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        nodes: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -630,7 +630,7 @@ Visualization Manager:
       Enabled: true
       Name: Opponent Goal
       Namespaces:
-        goal: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -643,7 +643,7 @@ Visualization Manager:
       Enabled: true
       Name: Opponent Lookahead
       Namespaces:
-        lookahead: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -656,7 +656,7 @@ Visualization Manager:
       Enabled: true
       Name: Opponent Path
       Namespaces:
-        path: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -669,7 +669,7 @@ Visualization Manager:
       Enabled: true
       Name: Opponent Tree Branches
       Namespaces:
-        branch: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -682,7 +682,7 @@ Visualization Manager:
       Enabled: true
       Name: Opponent Tree Nodes
       Namespaces:
-        nodes: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -695,7 +695,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        global_waypoints: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -771,16 +771,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 48.08248519897461
+      Distance: 19.596981048583984
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -6.016733646392822
-        Y: 45.95778274536133
-        Z: -9.84817123413086
+        X: -2.3853037357330322
+        Y: -3.496248960494995
+        Z: -4.043636798858643
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
